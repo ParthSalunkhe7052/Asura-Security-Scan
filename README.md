@@ -50,6 +50,33 @@ ASURA is a privacy-first security testing tool that helps solo developers and sm
 - **No Cloud Required** - Optional AI features only
 - **Open Source** - Full transparency, MIT licensed
 
+## 📸 Screenshots
+
+### Dashboard
+Get a complete overview of your project health with security scores, coverage metrics, and vulnerability distribution.
+
+![Dashboard](screenshots/Screenshot%20(52).png)
+
+### Security Scan Results
+View detailed scan results with severity levels, health scores, and filtering options.
+
+![Scan Results](screenshots/Screenshot%20(53).png)
+
+### AI-Powered Analysis
+Get intelligent vulnerability explanations and fix suggestions powered by AI.
+
+![AI Analysis](screenshots/Screenshot%20(54).png)
+
+### Detailed Vulnerability List
+Browse through all detected vulnerabilities with code references and security tool tags.
+
+![Vulnerability List](screenshots/Screenshot%20(55).png)
+
+### Project Management
+Manage multiple projects with ease from a clean, intuitive interface.
+
+![Projects](screenshots/Screenshot%20(56).png)
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -314,7 +341,7 @@ asura/
 │   │   ├── contexts/     # React contexts
 │   │   └── lib/          # Utilities (API client, utils)
 │   └── package.json      # Node dependencies
-├── RoadMap+/             # Detailed documentation
+├── screenshots/          # UI screenshots
 ├── setup.bat             # Windows setup script
 ├── start.bat             # Windows start script  
 ├── LICENSE               # MIT License
@@ -387,17 +414,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Documentation**: See [QUICK_START.md](QUICK_START.md) and `/RoadMap+/` folder
+- **Documentation**: See [QUICK_START.md](QUICK_START.md) and [GET_API_KEY.md](GET_API_KEY.md)
 - **Bug Reports**: [Open an issue](https://github.com/ParthSalunkhe7052/Asura-Security-Scan/issues)
 - **Feature Requests**: [Start a discussion](https://github.com/ParthSalunkhe7052/Asura-Security-Scan/discussions)
 - **Security Issues**: Email parth.ajit7052@gmail.com (do NOT open public issues)
 
 ## 🗺️ Roadmap
 
-For detailed roadmap and feature timeline, see:
-- [ROADMAP.md](RoadMap+/ROADMAP.md) - Full development plan
-- [CHANGELOG.md](CHANGELOG.md) - Version history
-- [TOOLS_COMPARISON.md](RoadMap+/TOOLS_COMPARISON.md) - Technology choices
+See [CHANGELOG.md](CHANGELOG.md) for version history and upcoming features.
 
 ## 📊 Project Stats
 
