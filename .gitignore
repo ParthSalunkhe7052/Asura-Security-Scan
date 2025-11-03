@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnpm-debug.log
+
+# Build
+dist/
+build/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Asura specific
+backend/asura.db
+backend/.pytest_cache/
+backend/logs/
+backend/reports/
+frontend/.vite/
+
+# Sensitive files - DO NOT COMMIT
+AsuraDevKey.txt
+backend/AsuraDevKey.txt
+*.key
+*.secret
+
+# Mutation testing
+.mutmut-cache
+backend/.mutmut-cache
+backend/tests/sample_module/.mutmut-cache
+
+# Coverage
+.coverage
+backend/.coverage
+coverage.json
+backend/coverage.json
+htmlcov/
