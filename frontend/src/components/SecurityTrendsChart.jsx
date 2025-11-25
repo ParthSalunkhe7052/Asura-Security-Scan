@@ -1,5 +1,6 @@
 import { TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 export function SecurityTrendsChart({ scans = [] }) {
   const [chartData, setChartData] = useState([])
@@ -28,14 +29,13 @@ export function SecurityTrendsChart({ scans = [] }) {
 
   if (chartData.length === 0) {
     return (
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 text-center py-12">
-        <p className="text-gray-600">Not enough scan data for trends</p>
+      <div className="bg-dark-800 rounded-xl p-6 border border-white/5 text-center py-12">
+        <p className="text-gray-400">Not enough scan data for trends</p>
         <p className="text-sm text-gray-500 mt-2">Run at least 2 scans to see trends</p>
       </div>
     )
   }
 
-  const maxValue = Math.max(...chartData.map(d => d.total), 10)
   const getTrend = () => {
     if (chartData.length < 2) return 'neutral'
     const first = chartData[0].total
@@ -50,15 +50,32 @@ export function SecurityTrendsChart({ scans = [] }) {
     ? Math.abs(((chartData[chartData.length - 1].total - chartData[0].total) / chartData[0].total) * 100)
     : 0
 
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-dark-900 border border-white/10 p-3 rounded-lg shadow-xl backdrop-blur-md">
+          <p className="text-gray-300 text-sm font-medium mb-2">{label}</p>
+          {payload.map((entry, index) => (
+            <div key={index} className="flex items-center gap-2 text-xs">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+              <span className="text-gray-400 capitalize">{entry.name}:</span>
+              <span className="text-white font-mono">{entry.value}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    return null
+  }
+
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+    <div className="bg-dark-800 rounded-xl p-6 border border-white/5">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-bold text-gray-900">Security Trends</h3>
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${
-          trend === 'improving' ? 'bg-green-100 text-green-700' :
-          trend === 'worsening' ? 'bg-red-100 text-red-700' :
-          'bg-gray-100 text-gray-700'
-        }`}>
+        <h3 className="text-lg font-bold text-white">Security Trends</h3>
+        <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${trend === 'improving' ? 'bg-green-500/10 text-green-500' :
+          trend === 'worsening' ? 'bg-red-500/10 text-red-500' :
+            'bg-white/5 text-gray-400'
+          }`}>
           {trend === 'improving' && <TrendingDown size={16} />}
           {trend === 'worsening' && <TrendingUp size={16} />}
           {trend === 'stable' && <Minus size={16} />}
@@ -70,74 +87,42 @@ export function SecurityTrendsChart({ scans = [] }) {
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="relative h-64">
-        <div className="absolute inset-0 flex items-end justify-between gap-2">
-          {chartData.map((data, index) => {
-            const heightPercent = (data.total / maxValue) * 100
-            return (
-              <div key={data.id} className="flex-1 flex flex-col items-center gap-2">
-                {/* Bar */}
-                <div className="w-full flex flex-col-reverse gap-0.5" style={{ height: '200px' }}>
-                  {data.critical > 0 && (
-                    <div
-                      className="w-full bg-red-500 rounded-t transition-all hover:opacity-80"
-                      style={{ height: `${(data.critical / maxValue) * 200}px` }}
-                      title={`Critical: ${data.critical}`}
-                    ></div>
-                  )}
-                  {data.high > 0 && (
-                    <div
-                      className="w-full bg-orange-500 transition-all hover:opacity-80"
-                      style={{ height: `${(data.high / maxValue) * 200}px` }}
-                      title={`High: ${data.high}`}
-                    ></div>
-                  )}
-                  {data.medium > 0 && (
-                    <div
-                      className="w-full bg-yellow-500 transition-all hover:opacity-80"
-                      style={{ height: `${(data.medium / maxValue) * 200}px` }}
-                      title={`Medium: ${data.medium}`}
-                    ></div>
-                  )}
-                  {data.low > 0 && (
-                    <div
-                      className="w-full bg-blue-500 rounded-b transition-all hover:opacity-80"
-                      style={{ height: `${(data.low / maxValue) * 200}px` }}
-                      title={`Low: ${data.low}`}
-                    ></div>
-                  )}
-                </div>
-
-                {/* Label */}
-                <div className="text-center">
-                  <p className="text-xs font-medium text-gray-900">{data.total}</p>
-                  <p className="text-xs text-gray-500">{data.date}</p>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex items-center justify-center gap-4 mt-4 text-xs">
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 bg-red-500 rounded"></div>
-          <span className="text-gray-700">Critical</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 bg-orange-500 rounded"></div>
-          <span className="text-gray-700">High</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 bg-yellow-500 rounded"></div>
-          <span className="text-gray-700">Medium</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 bg-blue-500 rounded"></div>
-          <span className="text-gray-700">Low</span>
-        </div>
+      <div className="h-64 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <defs>
+              <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+            <XAxis
+              dataKey="date"
+              stroke="#6b7280"
+              fontSize={12}
+              tickLine={false}
+              axisLine={false}
+              dy={10}
+            />
+            <YAxis
+              stroke="#6b7280"
+              fontSize={12}
+              tickLine={false}
+              axisLine={false}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Area
+              type="monotone"
+              dataKey="total"
+              stroke="#0ea5e9"
+              strokeWidth={2}
+              fillOpacity={1}
+              fill="url(#colorTotal)"
+              name="Total Issues"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )

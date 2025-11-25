@@ -10,6 +10,7 @@ bandit==1.7.5
 pbr>=5.11.0  # Required by bandit
 safety==2.3.5
 semgrep>=1.140.0  # Use latest version, direct executable call
+detect-secrets==1.4.0
 
 # Code Analysis
 radon==6.0.1
@@ -20,8 +21,14 @@ python-dotenv==1.0.0
 python-multipart==0.0.6
 httpx==0.25.1
 requests==2.31.0  # For OpenRouter API integration
+tenacity==8.2.3  # For retry logic with exponential backoff
+packaging==21.3  # safety requires <22; pin compatible
+pyparsing>=2.4.7,<3  # ensure compatibility with Python 3.12
 
 # Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
+
+# Development Tools
+pre-commit==3.6.0  # Code quality hooks

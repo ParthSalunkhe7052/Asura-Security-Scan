@@ -4,6 +4,7 @@ from app.models.models import Project, Scan
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from typing import Optional, List
 from fastapi import HTTPException
+from app.utils.path_validator import PathValidator
 
 class ProjectService:
     @staticmethod
@@ -14,9 +15,20 @@ class ProjectService:
         if existing:
             raise HTTPException(status_code=400, detail=f"Project '{project.name}' already exists")
         
+        # Validate and sanitize project path
+        allowed_roots = PathValidator.get_allowed_roots_from_env()
+        is_valid, error_msg, resolved_path = PathValidator.sanitize_and_validate(
+            project.path, 
+            allowed_roots
+        )
+        
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Use the resolved canonical path
         db_project = Project(
             name=project.name,
-            path=project.path,
+            path=str(resolved_path),
             description=project.description
         )
         db.add(db_project)
@@ -28,6 +40,26 @@ class ProjectService:
     def get_projects(db: Session, skip: int = 0, limit: int = 100) -> List[Project]:
         """Get all projects with pagination"""
         return db.query(Project).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_projects_with_stats(db: Session, skip: int = 0, limit: int = 100) -> List[dict]:
+        """Get all projects with statistics"""
+        projects = db.query(Project).offset(skip).limit(limit).all()
+        results = []
+        for project in projects:
+            # Get statistics
+            total_scans = db.query(func.count(Scan.id)).filter(Scan.project_id == project.id).scalar()
+            
+            last_scan = db.query(Scan).filter(Scan.project_id == project.id)\
+                .order_by(Scan.started_at.desc()).first()
+            
+            results.append({
+                **project.__dict__,
+                "total_scans": total_scans,
+                "last_scan_date": last_scan.started_at if last_scan else None,
+                "latest_health_score": last_scan.health_score if last_scan else None
+            })
+        return results
     
     @staticmethod
     def get_project(db: Session, project_id: int) -> Optional[Project]:
@@ -62,6 +94,20 @@ class ProjectService:
             return None
         
         update_data = project_update.model_dump(exclude_unset=True)
+        
+        # If path is being updated, validate it
+        if 'path' in update_data:
+            allowed_roots = PathValidator.get_allowed_roots_from_env()
+            is_valid, error_msg, resolved_path = PathValidator.sanitize_and_validate(
+                update_data['path'],
+                allowed_roots
+            )
+            
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=error_msg)
+            
+            update_data['path'] = str(resolved_path)
+        
         for key, value in update_data.items():
             setattr(db_project, key, value)
         

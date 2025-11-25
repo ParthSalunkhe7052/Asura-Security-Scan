@@ -36,6 +36,93 @@ async def get_project_metrics(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    # Check for recent cached metrics (within last 1 hour)
+    # This makes the dashboard load much faster ("buttery smooth")
+    recent_metrics = db.query(CodeMetrics).filter(
+        CodeMetrics.project_id == project_id
+    ).order_by(CodeMetrics.created_at.desc()).first()
+
+    # If we have recent metrics (e.g. < 1 hour old), return them immediately
+    # unless they are empty/error
+    if recent_metrics and (datetime.utcnow() - recent_metrics.created_at).total_seconds() < 3600:
+        try:
+            complexity_data = json.loads(recent_metrics.complexity_data)
+            return {
+                "project_id": project_id,
+                "project_name": project.name,
+                "timestamp": recent_metrics.created_at.isoformat(),
+                "cached": True,
+                "complexity": {
+                    "status": "success",
+                    "average_complexity": recent_metrics.average_complexity,
+                    "files_analyzed": len(complexity_data),
+                    "files": complexity_data,
+                    "error": None
+                },
+                "coverage": {
+                    "status": "success",
+                    "coverage_percent": recent_metrics.coverage_percent,
+                    "lines_covered": recent_metrics.lines_covered,
+                    "lines_total": recent_metrics.lines_total,
+                    "error": None
+                },
+                "security": {
+                    "score": recent_metrics.security_score,
+                    "total_issues": int((100 - recent_metrics.security_score) / 2) if recent_metrics.security_score < 100 else 0, # Approximate reverse calc
+                    "last_scan": None # We could fetch this but it's a minor detail for cached view
+                },
+                "health": {
+                    "code_health_score": recent_metrics.code_health_score,
+                    "security_score": recent_metrics.security_score,
+                    "coverage_score": recent_metrics.coverage_score,
+                    "grade": "A" # We should ideally store grade or recalc it. For now let's recalc locally or just omit.
+                                 # Actually, let's just recalc the grade helper here if needed, or simpler:
+                                 # The frontend calculates grade? No, backend does.
+                                 # Let's quickly instantiate analyzer just for static helpers if needed, 
+                                 # or just return the scores and let frontend handle it? 
+                                 # The frontend expects "health" object.
+                                 # Let's just re-use the analyzer class method if it's static, or duplicate logic.
+                                 # Better: Re-instantiate analyzer is cheap if we don't run analysis.
+                }
+            }
+            # Re-calculating grade for cached data
+            # We can just use the analyzer to get the grade without running analysis
+            health_data = CodeMetricsAnalyzer.compute_code_health_score(
+                security_score=recent_metrics.security_score,
+                coverage_score=recent_metrics.coverage_score
+            )
+            
+            return {
+                "project_id": project_id,
+                "project_name": project.name,
+                "timestamp": recent_metrics.created_at.isoformat(),
+                "cached": True,
+                "complexity": {
+                    "status": "success",
+                    "average_complexity": recent_metrics.average_complexity,
+                    "files_analyzed": len(complexity_data),
+                    "files": complexity_data,
+                    "error": None
+                },
+                "coverage": {
+                    "status": "success",
+                    "coverage_percent": recent_metrics.coverage_percent,
+                    "lines_covered": recent_metrics.lines_covered,
+                    "lines_total": recent_metrics.lines_total,
+                    "error": None
+                },
+                "security": {
+                    "score": recent_metrics.security_score,
+                    "total_issues": 0, # Placeholder or fetch real scan
+                    "last_scan": None
+                },
+                "health": health_data
+            }
+        except Exception as e:
+            print(f"⚠️ Error loading cached metrics: {e}")
+            # Fallback to recomputing
+            pass
+
     # Get or compute metrics
     try:
         analyzer = CodeMetricsAnalyzer(project.path)

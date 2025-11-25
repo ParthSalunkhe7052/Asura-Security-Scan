@@ -48,13 +48,25 @@ class ScanService:
         # We'll create fresh sessions for each update
         db.close()
         
-        # Update status to RUNNING with fresh session
+        # Update status to RUNNING with fresh session and create notification
         fresh_db = SessionLocal()
         try:
+            from app.api.notifications import create_notification
+            
             scan = fresh_db.query(Scan).filter(Scan.id == scan_id).first()
             scan.status = ScanStatusEnum.RUNNING
             scan.progress_log = f"🚀 Initializing scan for: {project_name}"
             fresh_db.commit()
+            
+            # Create scan started notification
+            create_notification(
+                db=fresh_db,
+                type="scan_started",
+                title=f"Scan Started: {scan.scan_name}",
+                message=f"Security scan initiated for {project_name}",
+                scan_id=scan_id,
+                project_id=project_id
+            )
         finally:
             fresh_db.close()
         
@@ -94,26 +106,44 @@ class ScanService:
                 scan.progress_log = '\n'.join(scanner.progress_messages)
                 save_db.commit()
             
-            # Save vulnerabilities to database
+            # Save vulnerabilities to database using batch insert for better performance
+            vulnerability_mappings = []
             for vuln_data in results["vulnerabilities"]:
                 try:
-                    vulnerability = Vulnerability(
-                        scan_id=scan_id,
-                        tool=vuln_data["tool"],
-                        severity=SeverityEnum[vuln_data["severity"]],
-                        file_path=vuln_data["file_path"],
-                        line_number=vuln_data.get("line_number"),
-                        vulnerability_type=vuln_data["vulnerability_type"],
-                        description=vuln_data["description"],
-                        code_snippet=vuln_data.get("code_snippet"),
-                        cwe_id=vuln_data.get("cwe_id"),
-                        confidence=vuln_data.get("confidence")
-                    )
-                    save_db.add(vulnerability)
+                    # Prepare data for bulk insert
+                    vulnerability_dict = {
+                        "scan_id": scan_id,
+                        "tool": vuln_data["tool"],
+                        "severity": SeverityEnum[vuln_data["severity"]],
+                        "file_path": vuln_data["file_path"],
+                        "line_number": vuln_data.get("line_number"),
+                        "vulnerability_type": vuln_data["vulnerability_type"],
+                        "description": vuln_data["description"],
+                        "code_snippet": vuln_data.get("code_snippet"),
+                        "cwe_id": vuln_data.get("cwe_id"),
+                        "confidence": vuln_data.get("confidence")
+                    }
+                    vulnerability_mappings.append(vulnerability_dict)
                 except Exception as vuln_err:
-                    print(f"⚠️  Failed to save vulnerability: {vuln_err}")
+                    print(f"⚠️  Failed to prepare vulnerability: {vuln_err}")
                     # Continue with other vulnerabilities
                     continue
+            
+            # Bulk insert all vulnerabilities at once (much faster than individual inserts)
+            if vulnerability_mappings:
+                try:
+                    save_db.bulk_insert_mappings(Vulnerability, vulnerability_mappings)
+                    print(f"✅ Batch inserted {len(vulnerability_mappings)} vulnerabilities")
+                except Exception as batch_err:
+                    print(f"⚠️  Batch insert failed, falling back to individual inserts: {batch_err}")
+                    # Fallback to individual inserts if batch fails
+                    for vuln_dict in vulnerability_mappings:
+                        try:
+                            vulnerability = Vulnerability(**vuln_dict)
+                            save_db.add(vulnerability)
+                        except Exception as vuln_err:
+                            print(f"⚠️  Failed to save vulnerability: {vuln_err}")
+                            continue
             
             # Determine final status based on scanner results
             overall_status = results.get("overall_status", "complete")
@@ -146,6 +176,17 @@ class ScanService:
             try:
                 save_db.commit()
                 print(f"✅ Scan #{scan_id} saved to database successfully")
+                
+                # Create scan completed notification
+                from app.api.notifications import create_notification
+                create_notification(
+                    db=save_db,
+                    type="scan_completed",
+                    title=f"Scan Completed: {scan.scan_name}",
+                    message=f"Found {scan.total_issues} issues. Health score: {scan.health_score:.0f}",
+                    scan_id=scan_id,
+                    project_id=scan.project_id
+                )
             except Exception as commit_err:
                 print(f"❌ Failed to commit scan: {commit_err}")
                 save_db.rollback()
@@ -179,6 +220,18 @@ class ScanService:
                 scan.progress_log = (scan.progress_log or "") + f"\n\n❌ Scan failed: {str(e)}"
                 error_db.commit()
                 print(f"✅ Scan #{scan_id} marked as FAILED and saved")
+                
+                # Create scan failed notification
+                from app.api.notifications import create_notification
+                create_notification(
+                    db=error_db,
+                    type="scan_failed",
+                    title=f"Scan Failed: {scan.scan_name}",
+                    message=f"Scan encountered an error: {str(e)[:100]}",
+                    scan_id=scan_id,
+                    project_id=scan.project_id
+                )
+                
                 error_db.refresh(scan)
                 result_scan = scan
                 error_db.close()

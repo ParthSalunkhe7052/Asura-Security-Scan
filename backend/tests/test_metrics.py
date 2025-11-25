@@ -26,7 +26,7 @@ class TestCodeMetricsAnalyzer:
     
     def test_metrics_analyzer_invalid_path(self):
         """Test CodeMetricsAnalyzer with invalid path"""
-        with pytest.raises(ValueError, match="Project path does not exist"):
+        with pytest.raises(ValueError, match="Path does not exist"):
             CodeMetricsAnalyzer("/nonexistent/path")
     
     def test_analyze_complexity(self):

@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { BarChart3, TrendingUp, Shield, Activity, FileCode, Download } from 'lucide-react'
+import { BarChart3, TrendingUp, Shield, Activity, FileCode, Download, RefreshCw, Zap, Target, Layers } from 'lucide-react'
+import Card from '../components/Card'
+import Button from '../components/Button'
+import Badge from '../components/Badge'
+import { useToast } from '../contexts/ToastContext'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 function Metrics() {
   const { projectId } = useParams()
@@ -10,6 +14,7 @@ function Metrics() {
   const [metrics, setMetrics] = useState(null)
   const [loading, setLoading] = useState(true)
   const [computing, setComputing] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
     if (projectId) {
@@ -26,6 +31,7 @@ function Metrics() {
       setLoading(false)
     } catch (error) {
       console.error('Error loading metrics:', error)
+      toast.error('Failed to load metrics')
       setLoading(false)
     }
   }
@@ -38,9 +44,10 @@ function Metrics() {
       })
       const data = await response.json()
       setMetrics(data)
+      toast.success('Metrics recomputed successfully')
     } catch (error) {
       console.error('Error computing metrics:', error)
-      alert('Failed to compute metrics')
+      toast.error('Failed to compute metrics')
     } finally {
       setComputing(false)
     }
@@ -52,19 +59,19 @@ function Metrics() {
 
   const getGradeColor = (grade) => {
     const colors = {
-      A: 'text-green-600 bg-green-50 border-green-200',
-      B: 'text-blue-600 bg-blue-50 border-blue-200',
-      C: 'text-yellow-600 bg-yellow-50 border-yellow-200',
-      D: 'text-orange-600 bg-orange-50 border-orange-200',
-      F: 'text-red-600 bg-red-50 border-red-200'
+      A: 'text-green-400 border-green-500/50 bg-green-500/10',
+      B: 'text-blue-400 border-blue-500/50 bg-blue-500/10',
+      C: 'text-yellow-400 border-yellow-500/50 bg-yellow-500/10',
+      D: 'text-orange-400 border-orange-500/50 bg-orange-500/10',
+      F: 'text-red-400 border-red-500/50 bg-red-500/10'
     }
     return colors[grade] || colors.F
   }
 
   const getScoreColor = (score) => {
-    if (score >= 80) return 'text-green-600'
-    if (score >= 60) return 'text-yellow-600'
-    return 'text-red-600'
+    if (score >= 80) return 'text-green-400'
+    if (score >= 60) return 'text-yellow-400'
+    return 'text-red-400'
   }
 
   const getGradeDescription = (grade) => {
@@ -78,226 +85,233 @@ function Metrics() {
     return descriptions[grade] || descriptions.F
   }
 
-  const getScoreDescription = (score) => {
-    if (score >= 90) return '🎯 Exceptional'
-    if (score >= 80) return '✨ Excellent'
-    if (score >= 70) return '👍 Good'
-    if (score >= 60) return '⚠️ Fair'
-    if (score >= 50) return '⚡ Needs Work'
-    return '🚨 Critical'
-  }
-
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
-            <BarChart3 className="w-8 h-8 mr-3 text-blue-600" />
+          <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+            <BarChart3 className="w-8 h-8 text-primary-500" />
             Code Metrics
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Project: {project?.name}
+          <p className="text-gray-400 mt-1">
+            Detailed analysis for <span className="text-white font-medium">{project?.name}</span>
           </p>
         </div>
         <div className="flex gap-3">
-          <button
+          <Button
             onClick={computeMetrics}
-            disabled={computing}
-            className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${
-              computing
-                ? 'bg-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
+            isLoading={computing}
+            variant="neon"
+            icon={RefreshCw}
           >
-            <TrendingUp className="w-4 h-4 mr-2" />
-            {computing ? 'Computing...' : 'Recompute Metrics'}
-          </button>
-          <button
+            Recompute
+          </Button>
+          <Button
             onClick={exportMetrics}
-            className="flex items-center px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 dark:bg-slate-800 dark:text-white transition-colors"
+            variant="secondary"
+            icon={Download}
           >
-            <Download className="w-4 h-4 mr-2" />
             Export
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Code Health Score Card */}
       {metrics?.health && (
-        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl p-8 text-white shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold mb-2">Code Health Score</h2>
-              <p className="text-indigo-100">
-                Weighted score based on security and coverage metrics
+        <Card className="relative overflow-hidden border-primary-500/30 bg-gradient-to-br from-primary-900/20 to-purple-900/20">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <Activity size={150} />
+          </div>
+
+          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8 p-4">
+            <div className="flex-1">
+              <h2 className="text-2xl font-bold text-white mb-2">Code Health Score</h2>
+              <p className="text-gray-300 max-w-md">
+                A comprehensive rating based on security vulnerabilities, test coverage, and code complexity.
+              </p>
+
+              <div className="mt-6 flex gap-4">
+                <div className="bg-dark-900/50 rounded-xl p-4 border border-white/10 flex-1">
+                  <div className="flex items-center gap-2 mb-1 text-gray-400 text-sm">
+                    <Shield size={14} /> Security
+                  </div>
+                  <div className="text-2xl font-bold text-white">
+                    {metrics.health.security_score.toFixed(1)}
+                  </div>
+                </div>
+                <div className="bg-dark-900/50 rounded-xl p-4 border border-white/10 flex-1">
+                  <div className="flex items-center gap-2 mb-1 text-gray-400 text-sm">
+                    <Target size={14} /> Coverage
+                  </div>
+                  <div className="text-2xl font-bold text-white">
+                    {metrics.health.coverage_score.toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-center">
+              <div className={`inline-flex flex-col items-center justify-center w-40 h-40 rounded-full border-4 ${getGradeColor(metrics.health.grade)} bg-dark-900/50 backdrop-blur-xl shadow-[0_0_30px_rgba(0,0,0,0.3)]`}>
+                <span className="text-5xl font-bold text-white mb-1">
+                  {metrics.health.code_health_score.toFixed(0)}
+                </span>
+                <span className={`text-lg font-bold px-3 py-0.5 rounded-full ${getGradeColor(metrics.health.grade)}`}>
+                  Grade {metrics.health.grade}
+                </span>
+              </div>
+              <p className="mt-4 text-lg font-medium text-white">
+                {getGradeDescription(metrics.health.grade).emoji} {getGradeDescription(metrics.health.grade).label}
               </p>
             </div>
-            <div className="text-center">
-              <div className="text-sm font-semibold mb-1 text-indigo-200">
-                {getScoreDescription(metrics.health.code_health_score)}
-              </div>
-              <div className="text-6xl font-bold mb-2">
-                {metrics.health.code_health_score.toFixed(1)}
-              </div>
-              <div className={`inline-block px-6 py-3 rounded-full text-xl font-bold border-2 ${getGradeColor(metrics.health.grade)}`}>
-                {getGradeDescription(metrics.health.grade).emoji} {getGradeDescription(metrics.health.grade).label} ({metrics.health.grade})
-              </div>
-              <div className="text-sm text-indigo-200 mt-2">
-                {getGradeDescription(metrics.health.grade).description}
-              </div>
-            </div>
           </div>
-          
-          {/* Score Breakdown */}
-          <div className="mt-6 grid grid-cols-2 gap-4">
-            <div className="bg-white/10 backdrop-blur rounded-lg p-4">
-              <div className="flex items-center mb-2">
-                <Shield className="w-5 h-5 mr-2" />
-                <span className="font-semibold">Security</span>
-              </div>
-              <div className="text-3xl font-bold">{metrics.health.security_score.toFixed(1)}</div>
-              <div className="text-sm text-indigo-100">50% weight</div>
-            </div>
-            <div className="bg-white/10 backdrop-blur rounded-lg p-4">
-              <div className="flex items-center mb-2">
-                <FileCode className="w-5 h-5 mr-2" />
-                <span className="font-semibold">Coverage</span>
-              </div>
-              <div className="text-3xl font-bold">{metrics.health.coverage_score.toFixed(1)}%</div>
-              <div className="text-sm text-indigo-100">50% weight</div>
-            </div>
-          </div>
-        </div>
+        </Card>
       )}
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Security Metrics */}
         {metrics?.security && (
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-600 p-6">
-            <div className="flex items-center mb-4">
-              <Shield className="w-6 h-6 text-red-600 mr-2" />
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Security</h3>
+          <Card className="h-full">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20">
+                <Shield className="w-6 h-6 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Security</h3>
             </div>
-            <div className={`text-4xl font-bold mb-2 ${getScoreColor(metrics.security.score)}`}>
-              {metrics.security.score.toFixed(1)}
+
+            <div className="flex items-end gap-2 mb-6">
+              <span className={`text-5xl font-bold ${getScoreColor(metrics.security.score)}`}>
+                {metrics.security.score.toFixed(1)}
+              </span>
+              <span className="text-gray-500 mb-2">/ 100</span>
             </div>
-            <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
-              <div className="flex justify-between">
-                <span>Total Issues:</span>
-                <span className="font-semibold text-gray-900 dark:text-white">{metrics.security.total_issues}</span>
+
+            <div className="space-y-4">
+              <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
+                <span className="text-gray-400">Total Issues</span>
+                <span className="font-bold text-white">{metrics.security.total_issues}</span>
               </div>
               {metrics.security.last_scan && (
-                <div className="flex justify-between">
-                  <span>Last Scan:</span>
-                  <span className="font-semibold text-gray-900 dark:text-white">
+                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
+                  <span className="text-gray-400">Last Scan</span>
+                  <span className="font-mono text-sm text-white">
                     {new Date(metrics.security.last_scan).toLocaleDateString()}
                   </span>
                 </div>
               )}
             </div>
-          </div>
+          </Card>
         )}
 
         {/* Coverage Metrics */}
         {metrics?.coverage && (
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-600 p-6">
-            <div className="flex items-center mb-4">
-              <FileCode className="w-6 h-6 text-blue-600 mr-2" />
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Test Coverage</h3>
-            </div>
-            <div className={`text-4xl font-bold mb-2 ${getScoreColor(metrics.coverage.coverage_percent)}`}>
-              {metrics.coverage.coverage_percent.toFixed(1)}%
-            </div>
-            <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
-              <div className="flex justify-between">
-                <span>Lines Covered:</span>
-                <span className="font-semibold text-gray-900 dark:text-white">{metrics.coverage.lines_covered}</span>
+          <Card className="h-full">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
+                <FileCode className="w-6 h-6 text-blue-500" />
               </div>
-              <div className="flex justify-between">
-                <span>Total Lines:</span>
-                <span className="font-semibold text-gray-900 dark:text-white">{metrics.coverage.lines_total}</span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2 mt-2">
+              <h3 className="text-xl font-bold text-white">Test Coverage</h3>
+            </div>
+
+            <div className="flex items-end gap-2 mb-6">
+              <span className={`text-5xl font-bold ${getScoreColor(metrics.coverage.coverage_percent)}`}>
+                {metrics.coverage.coverage_percent.toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="space-y-4">
+              <div className="w-full bg-dark-900 rounded-full h-3 overflow-hidden border border-white/5">
                 <div
-                  className="bg-blue-600 h-2 rounded-full"
+                  className="bg-blue-500 h-full rounded-full transition-all duration-1000"
                   style={{ width: `${metrics.coverage.coverage_percent}%` }}
-                ></div>
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-white/5 rounded-lg text-center">
+                  <p className="text-xs text-gray-400 uppercase mb-1">Lines Covered</p>
+                  <p className="font-bold text-white">{metrics.coverage.lines_covered}</p>
+                </div>
+                <div className="p-3 bg-white/5 rounded-lg text-center">
+                  <p className="text-xs text-gray-400 uppercase mb-1">Total Lines</p>
+                  <p className="font-bold text-white">{metrics.coverage.lines_total}</p>
+                </div>
               </div>
             </div>
-          </div>
+          </Card>
         )}
       </div>
 
       {/* Complexity Analysis */}
       {metrics?.complexity && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-600">
-          <div className="p-6 border-b border-gray-200 dark:border-slate-600">
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Complexity Analysis</h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">
-              Cyclomatic complexity by file
-            </p>
+        <Card>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20">
+              <Layers className="w-6 h-6 text-purple-500" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-white">Complexity Analysis</h3>
+              <p className="text-gray-400 text-sm">Cyclomatic complexity breakdown</p>
+            </div>
           </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4">
-                <div className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-1">Average Complexity</div>
-                <div className="text-3xl font-bold text-blue-900 dark:text-blue-300">
-                  {metrics.complexity.average_complexity.toFixed(2)}
-                </div>
-              </div>
-              <div className="bg-green-50 dark:bg-green-900/30 rounded-lg p-4">
-                <div className="text-sm text-green-600 dark:text-green-400 font-medium mb-1">Files Analyzed</div>
-                <div className="text-3xl font-bold text-green-900 dark:text-green-300">
-                  {metrics.complexity.files_analyzed}
-                </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <div className="bg-dark-900/50 rounded-xl p-4 border border-white/5">
+              <div className="text-sm text-gray-400 font-medium mb-1">Average Complexity</div>
+              <div className="text-3xl font-bold text-white">
+                {metrics.complexity.average_complexity.toFixed(2)}
               </div>
             </div>
-
-            {/* Complexity per file */}
-            {metrics.complexity.files && Object.keys(metrics.complexity.files).length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 dark:bg-slate-700">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">File</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Complexity</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Functions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-                    {Object.entries(metrics.complexity.files).slice(0, 10).map(([file, data]) => (
-                      <tr key={file} className="hover:bg-gray-50 dark:hover:bg-slate-700">
-                        <td className="px-4 py-2 text-sm font-mono text-gray-900 dark:text-gray-300">{file}</td>
-                        <td className="px-4 py-2">
-                          <span className={`text-sm font-semibold ${
-                            data.complexity > 10 ? 'text-red-600' :
-                            data.complexity > 5 ? 'text-yellow-600' :
-                            'text-green-600'
-                          }`}>
-                            {data.complexity.toFixed(2)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">
-                          {data.functions?.length || 0}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="bg-dark-900/50 rounded-xl p-4 border border-white/5">
+              <div className="text-sm text-gray-400 font-medium mb-1">Files Analyzed</div>
+              <div className="text-3xl font-bold text-white">
+                {metrics.complexity.files_analyzed}
               </div>
-            )}
+            </div>
           </div>
-        </div>
+
+          {/* Complexity per file */}
+          {metrics.complexity.files && Object.keys(metrics.complexity.files).length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">File</th>
+                    <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">Complexity</th>
+                    <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">Functions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {Object.entries(metrics.complexity.files).slice(0, 10).map(([file, data]) => (
+                    <tr key={file} className="hover:bg-white/5 transition-colors">
+                      <td className="px-4 py-3 text-sm font-mono text-gray-300">{file}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant={
+                          data.complexity > 10 ? 'critical' :
+                            data.complexity > 5 ? 'medium' : 'success'
+                        }>
+                          {data.complexity.toFixed(2)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-400">
+                        {data.functions?.length || 0}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       )}
     </div>
   )

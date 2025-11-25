@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, AlertTriangle, Info, CheckCircle, Filter, Search, Download, X, Sparkles, Loader } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, Info, CheckCircle, Filter, Search, Download, X, Sparkles, Loader, Terminal as TerminalIcon, ChevronDown, ChevronUp, Code, FileText, Shield } from 'lucide-react'
 import { scansApi } from '../lib/api'
 import { VulnerabilityModal } from '../components/VulnerabilityModal'
-import { CopyButton } from '../components/CopyButton'
 import Terminal from '../components/Terminal'
 import { useToast } from '../contexts/ToastContext'
 import { downloadFile, exportToCSV, exportScanSummaryToCSV, exportToHTML } from '../lib/utils'
+import { motion, AnimatePresence } from 'framer-motion'
+import clsx from 'clsx'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 function SecurityResults() {
   const { scanId } = useParams()
@@ -21,18 +24,14 @@ function SecurityResults() {
   const [aiSuggestions, setAiSuggestions] = useState(null)
   const [loadingAI, setLoadingAI] = useState(false)
   const [showAIModal, setShowAIModal] = useState(false)
+  const [expandedVuln, setExpandedVuln] = useState(null)
 
   useEffect(() => {
     loadScanResults()
   }, [scanId])
 
-  // Separate effect for polling - only runs when scan is RUNNING or PENDING
   useEffect(() => {
-    if (!scan || scan.status === 'COMPLETED' || scan.status === 'FAILED') {
-      return // Don't poll if scan is done
-    }
-    
-    // Poll every 2 seconds for more responsive terminal updates
+    if (!scan || scan.status === 'COMPLETED' || scan.status === 'FAILED') return
     const interval = setInterval(loadScanResults, 2000)
     return () => clearInterval(interval)
   }, [scanId, scan?.status])
@@ -49,14 +48,12 @@ function SecurityResults() {
     }
   }
 
-  // Memoize filtered vulnerabilities to avoid re-filtering on every render
   const filteredVulnerabilities = useMemo(() => {
     if (!scan?.vulnerabilities) return []
-    
     return scan.vulnerabilities.filter(vuln => {
       const severityMatch = filterSeverity === 'ALL' || vuln.severity === filterSeverity
       const toolMatch = filterTool === 'ALL' || vuln.tool === filterTool
-      const searchMatch = searchQuery === '' || 
+      const searchMatch = searchQuery === '' ||
         vuln.vulnerability_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
         vuln.file_path.toLowerCase().includes(searchQuery.toLowerCase()) ||
         vuln.description.toLowerCase().includes(searchQuery.toLowerCase())
@@ -72,39 +69,25 @@ function SecurityResults() {
   }
 
   const getAISuggestions = async () => {
-    // If scan already has AI suggestions, load them directly
     if (scan.ai_suggestions) {
       setAiSuggestions({
         success: true,
         suggestions: scan.ai_suggestions,
         model: scan.ai_model,
-        summary: {
-          total_issues: scan.total_issues || 0,
-          critical: scan.vulnerabilities?.filter(v => v.severity === 'CRITICAL').length || 0,
-          high: scan.vulnerabilities?.filter(v => v.severity === 'HIGH').length || 0,
-          medium: scan.vulnerabilities?.filter(v => v.severity === 'MEDIUM').length || 0,
-          low: scan.vulnerabilities?.filter(v => v.severity === 'LOW').length || 0
-        },
-        cached: true,
-        generated_at: scan.ai_generated_at
+        cached: true
       })
       setShowAIModal(true)
       return
     }
 
-    // Generate new AI suggestions
     setLoadingAI(true)
     try {
       const response = await scansApi.getAISuggestions(scanId)
       setAiSuggestions(response.data)
       setShowAIModal(true)
-      
-      // Refresh scan data to get saved AI suggestions
       await loadScanResults()
-      
       toast.success(response.data.cached ? 'Loaded AI report!' : 'AI analysis complete!')
     } catch (error) {
-      console.error('Failed to get AI suggestions:', error)
       toast.error(error.response?.data?.detail || 'Failed to generate AI suggestions')
     } finally {
       setLoadingAI(false)
@@ -118,15 +101,12 @@ function SecurityResults() {
           scan_id: scanId,
           status: scan.status,
           total_issues: scan.total_issues,
-          vulnerabilities: filteredVulns
+          vulnerabilities: filteredVulnerabilities
         }, null, 2)
         downloadFile(data, `scan_${scanId}_results.json`, 'application/json')
         break
       case 'csv':
-        exportToCSV(filteredVulns, `scan_${scanId}_vulnerabilities.csv`)
-        break
-      case 'csv-summary':
-        exportScanSummaryToCSV(scan, `scan_${scanId}_summary.csv`)
+        exportToCSV(filteredVulnerabilities, `scan_${scanId}_vulnerabilities.csv`)
         break
       case 'html':
         exportToHTML(scan, `scan_${scanId}_report.html`)
@@ -135,52 +115,24 @@ function SecurityResults() {
     toast.success(`Exported as ${format.toUpperCase()}!`)
   }
 
-  const getSeverityIcon = (severity) => {
-    switch (severity) {
-      case 'CRITICAL':
-      case 'HIGH':
-        return <AlertTriangle className="text-red-600" size={20} />
-      case 'MEDIUM':
-        return <Info className="text-yellow-600" size={20} />
-      case 'LOW':
-        return <CheckCircle className="text-blue-600" size={20} />
-      default:
-        return null
-    }
-  }
-
-  const getSeverityBadgeClass = (severity) => {
-    switch (severity) {
-      case 'CRITICAL':
-        return 'badge-critical'
-      case 'HIGH':
-        return 'badge-high'
-      case 'MEDIUM':
-        return 'badge-medium'
-      case 'LOW':
-        return 'badge-low'
-      default:
-        return 'badge'
-    }
-  }
-
   if (loading && !scan) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+      <div className="flex items-center justify-center h-[60vh]">
+        <div className="w-16 h-16 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
       </div>
     )
   }
 
   if (!scan) {
     return (
-      <div className="card text-center">
-        <p className="text-gray-600">Scan not found</p>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="w-16 h-16 text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold text-white mb-2">Scan Not Found</h2>
+        <button onClick={() => navigate('/')} className="text-primary-400 hover:text-primary-300">Back to Dashboard</button>
       </div>
     )
   }
 
-  const filteredVulns = filteredVulnerabilities
   const severityCounts = {
     CRITICAL: scan.vulnerabilities?.filter(v => v.severity === 'CRITICAL').length || 0,
     HIGH: scan.vulnerabilities?.filter(v => v.severity === 'HIGH').length || 0,
@@ -189,502 +141,416 @@ function SecurityResults() {
   }
 
   return (
-    <div>
-      <button
+    <div className="space-y-6 pb-20">
+      <motion.button
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
         onClick={() => navigate('/')}
-        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
+        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors group mb-4"
       >
-        <ArrowLeft size={20} />
+        <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
         Back to Dashboard
-      </button>
+      </motion.button>
 
-      {/* Scan Header */}
-      <div className="card mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Scan Results #{scanId}</h1>
-            <p className="text-gray-600 mt-1">
-              Started: {new Date(scan.started_at).toLocaleString()}
-            </p>
-          </div>
-          
-          <div className="text-right">
-            <span className={`inline-block px-4 py-2 rounded-lg font-semibold ${
-              scan.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-              scan.status === 'RUNNING' ? 'bg-blue-100 text-blue-800' :
-              scan.status === 'FAILED' ? 'bg-red-100 text-red-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {scan.status}
-            </span>
-          </div>
+      {/* Header Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-dark-800/50 backdrop-blur-md border border-white/5 rounded-2xl p-6 relative overflow-hidden"
+      >
+        <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+          <TerminalIcon size={150} />
         </div>
 
-        {scan.status === 'RUNNING' && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
-            <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
-              <p className="text-blue-800 dark:text-blue-300">Scan in progress... This page will auto-refresh.</p>
+        <div className="relative z-10">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+            <div>
+              <div className="flex items-center gap-4 mb-2">
+                <h1 className="text-3xl font-bold text-white">Scan Results #{scanId}</h1>
+                <span className={clsx(
+                  "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border",
+                  scan.status === 'COMPLETED' ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                    scan.status === 'FAILED' ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                      "bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse"
+                )}>
+                  {scan.status}
+                </span>
+              </div>
+              <p className="text-gray-400 flex items-center gap-2 text-sm font-mono">
+                <TerminalIcon size={14} />
+                Started: {new Date(scan.started_at).toLocaleString()}
+              </p>
             </div>
-          </div>
-        )}
 
-        {/* Live Progress Terminal */}
-        {(scan.status === 'RUNNING' || scan.status === 'PENDING' || scan.progress_log) && (
-          <div className="mb-4">
-            <Terminal 
-              logs={scan.progress_log || ''} 
-              title="Live Scan Progress" 
-              isRunning={scan.status === 'RUNNING' || scan.status === 'PENDING'}
-            />
-          </div>
-        )}
+            {scan.status === 'COMPLETED' && (
+              <div className="flex gap-3">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={getAISuggestions}
+                  disabled={loadingAI}
+                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl font-medium shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40 transition-all"
+                >
+                  {loadingAI ? <Loader className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  <span>{scan.ai_suggestions ? 'View AI Report' : 'AI Analysis'}</span>
+                </motion.button>
 
-        {scan.status === 'COMPLETED' && (
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Total Issues</p>
-              <p className="text-3xl font-bold text-gray-900">{scan.total_issues}</p>
-            </div>
-            
-            <div className="text-center p-4 bg-red-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Critical</p>
-              <p className="text-3xl font-bold text-red-600">{severityCounts.CRITICAL}</p>
-            </div>
-            
-            <div className="text-center p-4 bg-orange-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">High</p>
-              <p className="text-3xl font-bold text-orange-600">{severityCounts.HIGH}</p>
-            </div>
-            
-            <div className="text-center p-4 bg-yellow-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Medium</p>
-              <p className="text-3xl font-bold text-yellow-600">{severityCounts.MEDIUM}</p>
-            </div>
-            
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Low</p>
-              <p className="text-3xl font-bold text-blue-600">{severityCounts.LOW}</p>
-            </div>
+                <div className="relative group">
+                  <button className="flex items-center gap-2 px-4 py-2 bg-white/5 text-gray-300 rounded-xl hover:bg-white/10 hover:text-white transition-all border border-white/5">
+                    <Download className="w-4 h-4" />
+                    <span>Export</span>
+                  </button>
+                  <div className="hidden group-hover:block absolute right-0 mt-2 w-48 bg-dark-800 border border-white/10 rounded-xl shadow-xl py-2 z-20 animate-fade-in">
+                    <button onClick={() => exportResults('json')} className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors">JSON</button>
+                    <button onClick={() => exportResults('csv')} className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors">CSV</button>
+                    <button onClick={() => exportResults('html')} className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors">HTML Report</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
 
-        {scan.health_score !== null && scan.status === 'COMPLETED' && (
-          <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">Health Score</span>
-              <span className={`text-2xl font-bold ${
-                scan.health_score >= 80 ? 'text-green-600' :
-                scan.health_score >= 60 ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                {scan.health_score.toFixed(0)}/100
-              </span>
-            </div>
-            <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all ${
-                  scan.health_score >= 80 ? 'bg-green-600' :
-                  scan.health_score >= 60 ? 'bg-yellow-600' :
-                  'bg-red-600'
-                }`}
-                style={{ width: `${scan.health_score}%` }}
+          {/* Live Progress */}
+          {(scan.status === 'RUNNING' || scan.status === 'PENDING') && (
+            <div className="mb-6">
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-4 flex items-center gap-3 animate-pulse">
+                <Loader className="animate-spin text-blue-400" />
+                <p className="text-blue-300 font-medium">Scan in progress... Analyzing codebase...</p>
+              </div>
+              <Terminal
+                logs={scan.progress_log || ''}
+                title="Live Scan Progress"
+                isRunning={true}
               />
             </div>
-          </div>
-        )}
+          )}
 
-        {/* AI Suggestions Button */}
-        {scan.status === 'COMPLETED' && scan.vulnerabilities && scan.vulnerabilities.length > 0 && (
-          <div className="mt-4">
-            <button
-              onClick={getAISuggestions}
-              disabled={loadingAI}
-              className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 dark:from-purple-500 dark:via-purple-600 dark:to-indigo-600 text-white rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl hover:from-purple-700 hover:via-purple-800 hover:to-indigo-800 transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          {/* Stats Grid */}
+          {scan.status === 'COMPLETED' && (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {[
+                { label: 'Total Issues', value: scan.total_issues, color: 'text-white', bg: 'bg-white/5', border: 'border-white/5' },
+                { label: 'Critical', value: severityCounts.CRITICAL, color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20' },
+                { label: 'High', value: severityCounts.HIGH, color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+                { label: 'Medium', value: severityCounts.MEDIUM, color: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
+                { label: 'Low', value: severityCounts.LOW, color: 'text-blue-500', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+              ].map((stat, i) => (
+                <motion.div
+                  key={stat.label}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.1 }}
+                  className={`p-4 rounded-xl border ${stat.border} ${stat.bg} text-center backdrop-blur-sm`}
+                >
+                  <p className={`text-[10px] uppercase tracking-wider font-bold opacity-70 mb-1 ${stat.color}`}>{stat.label}</p>
+                  <p className={`text-3xl font-bold ${stat.color}`}>{stat.value}</p>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Filters & Content */}
+      {scan.status === 'COMPLETED' && scan.vulnerabilities?.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="space-y-6"
+        >
+          {/* Filters Bar */}
+          <div className="flex flex-col md:flex-row gap-4 bg-dark-800/30 p-4 rounded-xl border border-white/5">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Search vulnerabilities..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-dark-900 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white focus:outline-none focus:border-primary-500 transition-colors"
+              />
+            </div>
+            <select
+              value={filterSeverity}
+              onChange={(e) => setFilterSeverity(e.target.value)}
+              className="bg-dark-900 border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-primary-500 transition-colors"
             >
-              {loadingAI ? (
-                <>
-                  <Loader className="animate-spin" size={24} />
-                  <span>Analyzing vulnerabilities with AI...</span>
-                </>
-              ) : scan.ai_suggestions ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={24} />
-                    <span>AI Scan Report</span>
-                  </div>
-                  <span className="text-xs bg-green-500/30 backdrop-blur px-3 py-1 rounded-full font-medium flex items-center gap-1">
-                    <CheckCircle size={14} />
-                    <span>Saved</span>
-                  </span>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={24} className="animate-pulse" />
-                    <span>AI Suggestions</span>
-                  </div>
-                  <span className="text-xs bg-white/20 backdrop-blur px-3 py-1 rounded-full font-medium">
-                    ✨ Powered by AI
-                  </span>
-                </>
-              )}
+              <option value="ALL">All Severities</option>
+              <option value="CRITICAL">Critical</option>
+              <option value="HIGH">High</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="LOW">Low</option>
+            </select>
+            <select
+              value={filterTool}
+              onChange={(e) => setFilterTool(e.target.value)}
+              className="bg-dark-900 border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-primary-500 transition-colors"
+            >
+              <option value="ALL">All Tools</option>
+              <option value="bandit">Bandit</option>
+              <option value="safety">Safety</option>
+              <option value="semgrep">Semgrep</option>
+              <option value="detect-secrets">Secrets</option>
+              <option value="npm-audit">NPM Audit</option>
+            </select>
+            <button
+              onClick={clearFilters}
+              className="px-4 py-2 bg-white/5 text-gray-300 rounded-lg hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2"
+            >
+              <X size={16} /> Clear
             </button>
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
-              {scan.ai_suggestions 
-                ? `AI report generated ${new Date(scan.ai_generated_at).toLocaleDateString()}`
-                : 'Get instant AI-powered recommendations to fix your security issues'
-              }
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Filters */}
-      {scan.status === 'COMPLETED' && scan.vulnerabilities && scan.vulnerabilities.length > 0 && (
-        <>
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Filter size={20} className="text-purple-600" />
-                <h3 className="font-bold text-gray-900">Filters</h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="relative group">
-                  <button
-                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
-                  >
-                    <Download size={16} />
-                    Export
-                  </button>
-                  <div className="hidden group-hover:block absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
-                    <button
-                      onClick={() => exportResults('json')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      📄 Export as JSON
-                    </button>
-                    <button
-                      onClick={() => exportResults('csv')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      📊 Export as CSV
-                    </button>
-                    <button
-                      onClick={() => exportResults('csv-summary')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      📋 Export Summary CSV
-                    </button>
-                    <button
-                      onClick={() => exportResults('html')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                    >
-                      🌐 Export as HTML
-                    </button>
-                  </div>
-                </div>
-                <button
-                  onClick={clearFilters}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
-                >
-                  <X size={16} />
-                  Clear
-                </button>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search vulnerabilities..."
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Severity</label>
-                <select
-                  value={filterSeverity}
-                  onChange={(e) => setFilterSeverity(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                >
-                  <option value="ALL">All Severities</option>
-                  <option value="CRITICAL">Critical ({severityCounts.CRITICAL})</option>
-                  <option value="HIGH">High ({severityCounts.HIGH})</option>
-                  <option value="MEDIUM">Medium ({severityCounts.MEDIUM})</option>
-                  <option value="LOW">Low ({severityCounts.LOW})</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Scanner Tool</label>
-                <select
-                  value={filterTool}
-                  onChange={(e) => setFilterTool(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                >
-                  <option value="ALL">All Tools</option>
-                  <option value="bandit">Bandit</option>
-                  <option value="safety">Safety</option>
-                  <option value="semgrep">Semgrep</option>
-                </select>
-              </div>
-            </div>
-            
-            <div className="mt-3 flex items-center justify-between text-sm">
-              <span className="text-gray-600">
-                Showing <span className="font-bold text-purple-600">{filteredVulns.length}</span> of <span className="font-bold">{scan.vulnerabilities.length}</span> issues
-              </span>
-              {(filterSeverity !== 'ALL' || filterTool !== 'ALL' || searchQuery !== '') && (
-                <span className="text-purple-600 font-medium">Filters active</span>
-              )}
-            </div>
           </div>
 
           {/* Vulnerabilities List */}
-          <div className="space-y-4">
-            {filteredVulns.map(vuln => {
-              const isCriticalOrHigh = vuln.severity === 'CRITICAL' || vuln.severity === 'HIGH'
-              const isLow = vuln.severity === 'LOW'
-              
-              return (
-                <div 
-                  key={vuln.id} 
-                  className={`card hover:shadow-lg transition cursor-pointer ${
-                    vuln.severity === 'CRITICAL' ? 'border-l-4 border-red-600' :
-                    vuln.severity === 'HIGH' ? 'border-l-4 border-orange-600' :
-                    vuln.severity === 'MEDIUM' ? 'border-l-4 border-yellow-600' :
-                    'border-l-4 border-blue-400'
-                  }`}
-                  onClick={() => setSelectedVulnerability(vuln)}
+          <div className="space-y-3">
+            <AnimatePresence>
+              {filteredVulnerabilities.map((vuln, index) => (
+                <motion.div
+                  key={vuln.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className={`group bg-dark-800/40 border border-white/5 rounded-xl overflow-hidden hover:border-white/10 transition-all duration-300 ${expandedVuln === vuln.id ? 'bg-dark-800/80 border-white/20 shadow-lg' : ''
+                    }`}
                 >
-                  <div className="flex items-start gap-4">
-                    <div className="flex-shrink-0">
-                      {getSeverityIcon(vuln.severity)}
-                    </div>
-                    
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1">
-                          <h3 className="font-bold text-lg text-gray-900 hover:text-purple-600 transition-colors">
-                            {vuln.vulnerability_type}
-                          </h3>
-                          <div className="flex items-center gap-2 mt-1">
-                            <p className="text-sm text-gray-600">
-                              {vuln.file_path}
-                              {vuln.line_number && `:${vuln.line_number}`}
-                            </p>
-                            <CopyButton text={vuln.file_path} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                          <span className={`badge ${getSeverityBadgeClass(vuln.severity)}`}>
-                            {vuln.severity}
-                          </span>
-                          <span className="badge bg-gray-100 text-gray-700">
-                            {vuln.tool}
-                          </span>
-                        </div>
-                      </div>
+                  <div
+                    onClick={() => setExpandedVuln(expandedVuln === vuln.id ? null : vuln.id)}
+                    className="p-4 cursor-pointer flex items-start gap-4"
+                  >
+                    <div className={clsx(
+                      "w-1.5 h-12 rounded-full shrink-0",
+                      vuln.severity === 'CRITICAL' ? "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" :
+                        vuln.severity === 'HIGH' ? "bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" :
+                          vuln.severity === 'MEDIUM' ? "bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]" :
+                            "bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                    )} />
 
-                      {/* Show full description for CRITICAL/HIGH */}
-                      {isCriticalOrHigh && (
-                        <>
-                          <p className="text-gray-700 mb-3">{vuln.description}</p>
-                          
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-1">
+                        <h3 className="font-bold text-white group-hover:text-primary-400 transition-colors truncate">
+                          {vuln.vulnerability_type}
+                        </h3>
+                        <span className={clsx(
+                          "text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border",
+                          vuln.severity === 'CRITICAL' ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                            vuln.severity === 'HIGH' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
+                              vuln.severity === 'MEDIUM' ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
+                                "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                        )}>
+                          {vuln.severity}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-400 line-clamp-1 mb-2">{vuln.description}</p>
+                      <div className="flex items-center gap-2 text-xs font-mono text-gray-500">
+                        <FileText size={12} />
+                        <span className="truncate">{vuln.file_path}</span>
+                        {vuln.line_number && <span className="text-gray-600">:{vuln.line_number}</span>}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="text-[10px] font-mono text-gray-500 bg-white/5 px-2 py-1 rounded border border-white/5">
+                        {vuln.tool}
+                      </span>
+                      {expandedVuln === vuln.id ? <ChevronUp className="text-gray-500" size={16} /> : <ChevronDown className="text-gray-500" size={16} />}
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {expandedVuln === vuln.id && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="border-t border-white/5 bg-dark-900/30"
+                      >
+                        <div className="p-4 space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Description</h4>
+                              <p className="text-sm text-gray-300 leading-relaxed">{vuln.description}</p>
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Location</h4>
+                              <div className="bg-dark-900 p-2 rounded border border-white/5 font-mono text-xs text-gray-400 break-all">
+                                {vuln.file_path}:{vuln.line_number}
+                              </div>
+                            </div>
+                          </div>
+
                           {vuln.code_snippet && (
-                            <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto mb-3">
-                              <pre className="text-sm">{vuln.code_snippet}</pre>
+                            <div>
+                              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                <Code size={12} /> Code Snippet
+                              </h4>
+                              <div className="bg-dark-900 rounded-lg p-4 overflow-x-auto border border-white/5 font-mono text-sm text-gray-300">
+                                <pre>{vuln.code_snippet}</pre>
+                              </div>
                             </div>
                           )}
-                          
-                          {vuln.cwe_id && (
-                            <p className="text-xs text-gray-500">CWE: {vuln.cwe_id}</p>
-                          )}
-                        </>
-                      )}
 
-                      {/* Show truncated description for MEDIUM */}
-                      {vuln.severity === 'MEDIUM' && (
-                        <>
-                          <p className="text-gray-700 mb-2">
-                            {vuln.description.length > 150 
-                              ? vuln.description.substring(0, 150) + '...' 
-                              : vuln.description}
-                          </p>
-                          {vuln.cwe_id && (
-                            <p className="text-xs text-gray-500">CWE: {vuln.cwe_id}</p>
-                          )}
-                        </>
-                      )}
-
-                      {/* Minimal detail for LOW */}
-                      {isLow && (
-                        <p className="text-sm text-gray-600 italic">
-                          Click to view details
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+                          <div className="flex justify-end pt-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedVulnerability(vuln)
+                              }}
+                              className="px-4 py-2 bg-white/5 text-gray-300 rounded-lg hover:bg-white/10 hover:text-white transition-colors text-sm font-medium flex items-center gap-2"
+                            >
+                              <Info size={16} /> View Full Details
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
-        </>
+        </motion.div>
       )}
 
-      {scan.status === 'COMPLETED' && (!scan.vulnerabilities || scan.vulnerabilities.length === 0) && (
-        <div className="card text-center py-12">
-          <CheckCircle className="mx-auto text-green-600 mb-4" size={64} />
-          <h3 className="text-xl font-semibold text-gray-700 mb-2">No Issues Found! 🎉</h3>
-          <p className="text-gray-600">Your code is looking secure. Keep up the good work!</p>
-        </div>
+      {/* Empty State */}
+      {scan.status === 'COMPLETED' && filteredVulnerabilities.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center justify-center py-20 text-center bg-green-500/5 rounded-3xl border border-green-500/20 border-dashed"
+        >
+          <div className="w-24 h-24 rounded-full bg-green-500/10 flex items-center justify-center mb-6 border border-green-500/20 shadow-[0_0_20px_rgba(34,197,94,0.2)]">
+            <CheckCircle className="w-12 h-12 text-green-500" />
+          </div>
+          <h3 className="text-2xl font-bold text-white mb-2">System Secure</h3>
+          <p className="text-gray-400 max-w-md">
+            No vulnerabilities detected matching your filters. Your code passed all security checks.
+          </p>
+        </motion.div>
       )}
-      
-      {/* AI Suggestions Modal */}
-      {showAIModal && aiSuggestions && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-slideUp">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 dark:from-purple-500 dark:via-purple-600 dark:to-indigo-600 p-6 text-white">
-              <div className="flex items-center justify-between">
+
+      {/* AI Modal */}
+      <AnimatePresence>
+        {showAIModal && aiSuggestions && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+              onClick={() => setShowAIModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-4xl max-h-[90vh] bg-dark-800 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b border-white/10 bg-gradient-to-r from-purple-900/50 to-dark-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/20 rounded-lg backdrop-blur">
-                    <Sparkles size={28} className="animate-pulse" />
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-bold">
-                      AI Security Analysis
-                      {aiSuggestions.cached && (
-                        <span className="ml-3 text-sm font-normal bg-green-500/30 px-2 py-1 rounded">
-                          Saved Report
-                        </span>
-                      )}
-                    </h2>
-                    <p className="text-purple-100 text-sm mt-1">
-                      🤖 Powered by {aiSuggestions.model?.split('/')[1] || aiSuggestions.model}
-                      {aiSuggestions.generated_at && (
-                        <span className="ml-2 opacity-75">
-                          • Generated {new Date(aiSuggestions.generated_at).toLocaleDateString()}
-                        </span>
-                      )}
-                    </p>
-                  </div>
+                  <Sparkles className="text-purple-400 animate-pulse" />
+                  <h2 className="text-xl font-bold text-white">AI Security Analysis</h2>
                 </div>
-                <button
-                  onClick={() => setShowAIModal(false)}
-                  className="text-white hover:bg-white/20 p-2 rounded-lg transition-all hover:rotate-90 duration-200"
-                  aria-label="Close modal"
-                >
+                <button onClick={() => setShowAIModal(false)} className="text-gray-400 hover:text-white transition-colors">
                   <X size={24} />
                 </button>
               </div>
-              
-              {/* Summary Stats */}
-              <div className="grid grid-cols-4 gap-3 mt-4">
-                <div className="bg-white/10 backdrop-blur-md rounded-lg p-3 text-center border border-white/20 hover:bg-white/20 transition">
-                  <p className="text-xs text-purple-100 mb-1">Total Issues</p>
-                  <p className="text-2xl font-bold">{aiSuggestions.summary.total_issues}</p>
-                </div>
-                <div className="bg-red-500/20 backdrop-blur-md rounded-lg p-3 text-center border border-red-300/30 hover:bg-red-500/30 transition">
-                  <p className="text-xs text-purple-100 mb-1">🔴 Critical</p>
-                  <p className="text-2xl font-bold">{aiSuggestions.summary.critical}</p>
-                </div>
-                <div className="bg-orange-500/20 backdrop-blur-md rounded-lg p-3 text-center border border-orange-300/30 hover:bg-orange-500/30 transition">
-                  <p className="text-xs text-purple-100 mb-1">🟠 High</p>
-                  <p className="text-2xl font-bold">{aiSuggestions.summary.high}</p>
-                </div>
-                <div className="bg-yellow-500/20 backdrop-blur-md rounded-lg p-3 text-center border border-yellow-300/30 hover:bg-yellow-500/30 transition">
-                  <p className="text-xs text-purple-100 mb-1">🟡 Medium</p>
-                  <p className="text-2xl font-bold">{aiSuggestions.summary.medium}</p>
+
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                <div className="prose prose-invert prose-blue max-w-none prose-headings:font-bold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-gray-300 prose-li:text-gray-300 prose-code:text-primary-400 prose-code:bg-primary-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-900 prose-pre:border prose-pre:border-white/10">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h2: ({ node, children, ...props }) => {
+                        const text = children?.toString() || '';
+                        const isAutoFixPrompt = text.includes('AI AUTO FIX PROMPT') || text.includes('🤖');
+
+                        if (isAutoFixPrompt) {
+                          // Extract the prompt content (everything after this heading)
+                          const fullText = aiSuggestions.suggestions;
+                          const promptStart = fullText.indexOf('## 🤖 AI AUTO FIX PROMPT');
+                          const promptContent = promptStart !== -1 ? fullText.substring(promptStart) : '';
+
+                          const [copied, setCopied] = useState(false);
+
+                          const handleCopy = async () => {
+                            try {
+                              // Extract just the prompt part (remove the heading and format for AI IDE)
+                              const lines = promptContent.split('\n');
+                              const promptLines = lines.slice(2).filter(line => line.trim() !== '---'); // Skip heading and separator
+                              const cleanPrompt = promptLines.join('\n').trim();
+
+                              await navigator.clipboard.writeText(cleanPrompt);
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                              toast.success('AI Auto Fix Prompt copied to clipboard!');
+                            } catch (err) {
+                              toast.error('Failed to copy prompt');
+                            }
+                          };
+
+                          return (
+                            <div className="mt-8 mb-4">
+                              <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border-2 border-purple-500/30 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <h2 className="text-xl font-bold flex items-center gap-2 m-0" {...props}>
+                                    {children}
+                                  </h2>
+                                  <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    onClick={handleCopy}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${copied
+                                        ? 'bg-green-500/20 text-green-400 border-2 border-green-500/50'
+                                        : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white border-2 border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/30'
+                                      }`}
+                                  >
+                                    {copied ? (
+                                      <>
+                                        <CheckCircle className="w-4 h-4" />
+                                        <span>Copied!</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <TerminalIcon className="w-4 h-4" />
+                                        <span>Copy Prompt</span>
+                                      </>
+                                    )}
+                                  </motion.button>
+                                </div>
+                                <p className="text-xs text-gray-400 m-0">
+                                  Copy this prompt and paste it into your AI IDE (Windsurf, Cursor, Antigravity) to automatically fix all issues
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return <h2 {...props}>{children}</h2>;
+                      }
+                    }}
+                  >
+                    {aiSuggestions.suggestions}
+                  </ReactMarkdown>
                 </div>
               </div>
-            </div>
-            
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-280px)] bg-gradient-to-b from-gray-50 to-white dark:from-gray-800 dark:to-gray-900">
-              <div className="prose prose-purple dark:prose-invert max-w-none">
-                <div className="whitespace-pre-wrap text-gray-800 dark:text-gray-200 leading-relaxed font-normal text-[15px]">
-                  {aiSuggestions.suggestions.split('\n').map((line, idx) => {
-                    // Bold headers (lines starting with numbers or **text**)
-                    if (line.match(/^\d+\.\s\*\*.*\*\*/) || line.match(/^\*\*.*\*\*/)) {
-                      return (
-                        <p key={idx} className="font-bold text-purple-700 dark:text-purple-400 text-lg mt-4 mb-2">
-                          {line.replace(/\*\*/g, '')}
-                        </p>
-                      )
-                    }
-                    // Sub-items (lines starting with - or *)
-                    if (line.trim().startsWith('-') || line.trim().startsWith('*')) {
-                      return (
-                        <p key={idx} className="ml-4 text-gray-700 dark:text-gray-300 mb-1">
-                          {line}
-                        </p>
-                      )
-                    }
-                    // Regular text
-                    if (line.trim()) {
-                      return (
-                        <p key={idx} className="mb-2">
-                          {line}
-                        </p>
-                      )
-                    }
-                    return <br key={idx} />
-                  })}
-                </div>
-              </div>
-              
-              {/* Token Usage */}
-              {aiSuggestions.usage && (
-                <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span>✨ Generated using {aiSuggestions.usage.total_tokens || 'N/A'} tokens</span>
-                    <span className="text-purple-600 dark:text-purple-400">AI-Powered Analysis</span>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Modal Footer */}
-            <div className="bg-gray-50 dark:bg-gray-800 p-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center gap-3">
-              <div className="text-xs text-gray-600 dark:text-gray-400">
-                💡 Tip: Save these suggestions for your development team
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    const text = `🔒 AI Security Analysis - ${scan.project?.name || 'ASURA'}\n\nGenerated: ${new Date().toLocaleString()}\nModel: ${aiSuggestions.model}\n\n${aiSuggestions.suggestions}\n\n---\nTotal Issues: ${aiSuggestions.summary.total_issues} | Critical: ${aiSuggestions.summary.critical} | High: ${aiSuggestions.summary.high} | Medium: ${aiSuggestions.summary.medium}`
-                    navigator.clipboard.writeText(text)
-                    toast.success('Copied to clipboard!')
-                  }}
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium"
-                >
-                  📋 Copy to Clipboard
-                </button>
+
+              <div className="p-4 border-t border-white/10 bg-dark-900/50 flex justify-end">
                 <button
                   onClick={() => setShowAIModal(false)}
-                  className="px-6 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded-lg hover:bg-purple-700 dark:hover:bg-purple-600 transition font-medium shadow-lg"
+                  className="px-6 py-2 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-colors font-medium"
                 >
-                  Close
+                  Close Report
                 </button>
               </div>
-            </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {selectedVulnerability && (
-        <VulnerabilityModal 
+        <VulnerabilityModal
           vulnerability={selectedVulnerability}
           onClose={() => setSelectedVulnerability(null)}
         />

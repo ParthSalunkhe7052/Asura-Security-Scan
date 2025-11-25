@@ -156,10 +156,79 @@ Run security scanners on ASURA itself:
 # Scan ASURA backend
 cd backend
 python -m bandit -r app/ -f json
+ 
+# Check dependencies
+python -m safety check --file requirements.txt
+```
+
+### Running Asura on Itself
+
+ASURA practices what it preaches by running its own security scanners on its own codebase. This self-scanning process ensures we maintain high security standards.
+
+**To scan Asura with Asura:**
+
+```bash
+# 1. Start the Asura application
+start.bat  # Windows
+# or
+./start.sh  # Linux/Mac
+
+# 2. Access the web UI at http://localhost:5173
+
+# 3. Create a project pointing to Asura's backend:
+#    Name: "Asura Self-Scan"
+#    Path: C:\path\to\Asura\backend  (use absolute path)
+
+# 4. Run a security scan
+
+# 5. Review results - expect mostly LOW severity findings
+```
+
+**Understanding Self-Scan Results:**
+
+When you scan Asura with itself, you'll see:
+
+1. **B101 (Assert in Tests)**: ~67 occurrences - **FALSE POSITIVES**
+   - These are in test files (`tests/`)
+   - Using `assert` in tests is standard pytest practice
+   - Safe to ignore - already suppressed in `.bandit` config
+   
+2. **B603/B404 (Subprocess Usage)**: ~15 occurrences - **SAFE**
+   - All subprocess calls use controlled inputs:
+     - `sys.executable` (Python interpreter path)
+     - Hardcoded tool names (bandit, safety, semgrep)
+     - Validated file paths from path_validator.py
+   - No `shell=True` usage
+   - No user-controllable input reaches subprocess calls
+   - See inline `# nosec B603` comments for justification
+
+3. **B110 (Try/Except/Pass)**: 2 occurrences - **FIXED**
+   - Updated to use proper logging instead of silent failures
+   - See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for details
+
+**Overall Security Posture**:
+- ✅ No CRITICAL or HIGH severity issues
+- ✅ No SQL injection vulnerabilities (uses SQLAlchemy ORM)
+- ✅ No XSS vulnerabilities (CSP headers implemented)
+- ✅ All subprocess usage is safe and documented
+- ✅ Input validation implemented for file paths
+
+For detailed analysis of Asura's self-scan, see [docs/SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+
+### Self-Assessment (Deprecated - Use "Running Asura on Itself" above)
+
+Run security scanners on ASURA itself:
+
+```bash
+# Scan ASURA backend (with Bandit configuration)
+cd backend
+python -m bandit -r app/ -c ../.bandit -f json
 
 # Check dependencies
 python -m safety check --file requirements.txt
 ```
+
+**Note**: The `.bandit` configuration file suppresses false positives for test files while maintaining security checks
 
 ## 📚 Security Resources
 

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.scan import ScanCreate, ScanResponse, ScanDetailResponse, VulnerabilityResponse
 from app.services.scan_service import ScanService
-from app.core.llm_adapter import send_prompt
+from app.core import llm_adapter
 from typing import List, Dict, Any
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
@@ -73,25 +73,98 @@ async def run_scan(
     
     return scan
 
-@router.get("/{scan_id}/vulnerabilities", response_model=List[VulnerabilityResponse])
+@router.get("/{scan_id}/vulnerabilities", response_model=Dict[str, Any])
 async def get_scan_vulnerabilities(
     scan_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    severity: str = None,
+    tool: str = None,
     db: Session = Depends(get_db)
 ):
-    """Get all vulnerabilities for a specific scan"""
-    from app.models.models import Vulnerability
+    """
+    Get vulnerabilities for a specific scan with pagination and filtering.
+    
+    Args:
+        scan_id: ID of the scan
+        skip: Number of records to skip (for pagination)
+        limit: Maximum number of records to return (max: 200)
+        severity: Optional filter by severity (LOW, MEDIUM, HIGH, CRITICAL)
+        tool: Optional filter by tool (bandit, safety, semgrep)
+    
+    Returns:
+        Dict with vulnerabilities, total count, and pagination info
+    """
+    from app.models.models import Vulnerability, SeverityEnum
     
     # Check if scan exists
     scan = ScanService.get_scan(db, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     
-    # Get vulnerabilities for this scan
-    vulnerabilities = db.query(Vulnerability).filter(
-        Vulnerability.scan_id == scan_id
-    ).all()
+    # Enforce limit bounds
+    limit = min(limit, 200)  # Max 200 items per page
     
-    return vulnerabilities
+    # Build query with filters
+    query = db.query(Vulnerability).filter(Vulnerability.scan_id == scan_id)
+    
+    # Apply severity filter if provided
+    if severity:
+        try:
+            severity_enum = SeverityEnum[severity.upper()]
+            query = query.filter(Vulnerability.severity == severity_enum)
+        except KeyError:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid severity. Must be one of: {', '.join([s.name for s in SeverityEnum])}"
+            )
+    
+    # Apply tool filter if provided
+    if tool:
+        valid_tools = ["bandit", "safety", "semgrep"]
+        if tool.lower() not in valid_tools:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid tool. Must be one of: {', '.join(valid_tools)}"
+            )
+        query = query.filter(Vulnerability.tool == tool.lower())
+    
+    # Get total count before pagination
+    total_count = query.count()
+    
+    # Apply pagination and order by severity (CRITICAL first)
+    vulnerabilities = query.order_by(
+        Vulnerability.severity,
+        Vulnerability.id
+    ).offset(skip).limit(limit).all()
+    
+    # Convert ORM objects to Pydantic schemas for proper serialization
+    vulnerability_responses = [
+        VulnerabilityResponse.from_orm(v) for v in vulnerabilities
+    ]
+    
+    # Calculate pagination metadata
+    has_next = (skip + limit) < total_count
+    has_prev = skip > 0
+    total_pages = (total_count + limit - 1) // limit  # Ceiling division
+    current_page = (skip // limit) + 1
+    
+    return {
+        "vulnerabilities": vulnerability_responses,
+        "pagination": {
+            "total": total_count,
+            "skip": skip,
+            "limit": limit,
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "has_next": has_next,
+            "has_prev": has_prev
+        },
+        "filters": {
+            "severity": severity,
+            "tool": tool
+        }
+    }
 
 
 @router.post("/{scan_id}/ai-suggestions")
@@ -154,17 +227,17 @@ async def get_ai_suggestions(
         
         # Group vulnerabilities by severity
         severity_counts = {
-            "CRITICAL": len([v for v in vulnerabilities if v.severity == "CRITICAL"]),
-            "HIGH": len([v for v in vulnerabilities if v.severity == "HIGH"]),
-            "MEDIUM": len([v for v in vulnerabilities if v.severity == "MEDIUM"]),
-            "LOW": len([v for v in vulnerabilities if v.severity == "LOW"])
+            "CRITICAL": len([v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "CRITICAL"]),
+            "HIGH": len([v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "HIGH"]),
+            "MEDIUM": len([v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "MEDIUM"]),
+            "LOW": len([v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "LOW"])
         }
         
         # Build detailed vulnerability summary for LLM
-        critical_vulns = [v for v in vulnerabilities if v.severity == "CRITICAL"]
-        high_vulns = [v for v in vulnerabilities if v.severity == "HIGH"]
-        medium_vulns = [v for v in vulnerabilities if v.severity == "MEDIUM"]
-        low_vulns = [v for v in vulnerabilities if v.severity == "LOW"]
+        critical_vulns = [v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "CRITICAL"]
+        high_vulns = [v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "HIGH"]
+        medium_vulns = [v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "MEDIUM"]
+        low_vulns = [v for v in vulnerabilities if getattr(v.severity, "value", str(v.severity)) == "LOW"]
         
         # Build optimized prompt focusing on critical issues
         prompt_parts = [
@@ -208,23 +281,70 @@ async def get_ai_suggestions(
         
         prompt = "\n".join(prompt_parts)
         
-        prompt += """
-Based on this security scan, provide:
+        # Build AI Auto Fix Prompt section with all vulnerabilities
+        auto_fix_prompt_parts = [
+            "",
+            "---",
+            "",
+            "## 🤖 AI AUTO FIX PROMPT",
+            "",
+            "I need you to fix the following security vulnerabilities in my codebase:",
+            ""
+        ]
+        
+        # Group vulnerabilities by file
+        from collections import defaultdict
+        vulns_by_file = defaultdict(list)
+        for vuln in vulnerabilities:
+            vulns_by_file[vuln.file_path].append(vuln)
+        
+        # Add each file's vulnerabilities to the auto-fix prompt
+        for file_path, file_vulns in sorted(vulns_by_file.items()):
+            auto_fix_prompt_parts.append(f"**File: `{file_path}`**")
+            for vuln in file_vulns:
+                severity = getattr(vuln.severity, "value", str(vuln.severity))
+                line_info = f" at line {vuln.line_number}" if vuln.line_number else ""
+                auto_fix_prompt_parts.append(f"- **[{severity}]** {vuln.vulnerability_type}{line_info}")
+                auto_fix_prompt_parts.append(f"  - Tool: {vuln.tool}")
+                if vuln.description:
+                    desc = vuln.description[:200] + "..." if len(vuln.description) > 200 else vuln.description
+                    auto_fix_prompt_parts.append(f"  - Issue: {desc}")
+            auto_fix_prompt_parts.append("")
+        
+        auto_fix_prompt_parts.append("Please make the necessary changes to address these security issues while maintaining code functionality and following security best practices.")
+        
+        auto_fix_prompt = "\n".join(auto_fix_prompt_parts)
+        
+        prompt += f"""
+Based on this security scan, provide a **comprehensive and engaging security report**. 
 
-1. **Priority Actions** (3-5 most critical fixes needed immediately)
-2. **Root Cause Analysis** (What patterns or practices are causing these issues?)
-3. **Implementation Roadmap** (Step-by-step plan to fix major issues)
-4. **Best Practices** (2-3 security practices to prevent these issues)
-5. **Quick Wins** (Easy fixes that can be done right away)
+**Role**: You are an elite Cybersecurity Consultant advising a development team. Your tone should be professional yet encouraging, authoritative but accessible.
 
-Focus on ACTIONABLE advice. Be specific about what to change and why. Keep the response concise and developer-friendly.
+**Format Requirements**:
+- Use **Markdown** heavily (headers, bolding, lists).
+- Use **Emojis** 🛡️ ⚠️ 🚀 to make sections pop.
+- Use **Code Blocks** for specific fix examples.
+- Avoid walls of text; use bullet points and short paragraphs.
+
+**Report Structure**:
+1.  **🚨 Executive Summary**: A 2-sentence high-level assessment of the project's security posture.
+2.  **🔥 Critical Fixes (Priority Actions)**: The top 3-5 things that must be fixed TODAY. Explain *why* and *how* (with code examples).
+3.  **🕵️ Root Cause Analysis**: What patterns are causing these issues? (e.g., "Lack of input sanitization", "Hardcoded secrets").
+4.  **🛡️ Defense Strategy**: 2-3 best practices to prevent this in the future.
+5.  **✨ Quick Wins**: Low-hanging fruit that improves security with minimal effort.
+
+**IMPORTANT**: End your report with the exact AI Auto Fix Prompt section below (copy it exactly as-is):
+
+{auto_fix_prompt}
+
+Make the developer feel empowered to fix these issues!
 """
         
         print(f"🤖 Requesting AI suggestions for scan #{scan_id}")
         print(f"   Total vulnerabilities: {len(vulnerabilities)}")
         
         # Send to LLM (with automatic fallback)
-        result = send_prompt(prompt, max_tokens=2000, temperature=0.5)
+        result = llm_adapter.send_prompt(prompt, max_tokens=2000, temperature=0.5)
         
         if result["success"]:
             # Save AI suggestions to database for future use
@@ -256,11 +376,30 @@ Focus on ACTIONABLE advice. Be specific about what to change and why. Keep the r
                 "usage": result.get("usage", {})
             }
         else:
-            # LLM failed, return error
-            raise HTTPException(
-                status_code=500,
-                detail=f"AI analysis failed: {result.get('error', 'Unknown error')}"
-            )
+            fallback = [
+                "AI suggestions unavailable.",
+                f"Critical issues: {severity_counts['CRITICAL']}",
+                f"High issues: {severity_counts['HIGH']}",
+                "Focus on remediating critical findings first, then high.",
+                "Apply security best practices, update vulnerable dependencies, and add input validation."
+            ]
+            message = result.get("error") or "LLM unavailable"
+            return {
+                "success": True,
+                "suggestions": "\n".join(fallback),
+                "model": None,
+                "summary": {
+                    "total_issues": len(vulnerabilities),
+                    "critical": severity_counts["CRITICAL"],
+                    "high": severity_counts["HIGH"],
+                    "medium": severity_counts["MEDIUM"],
+                    "low": severity_counts["LOW"]
+                },
+                "cached": False,
+                "generated_at": None,
+                "usage": {},
+                "message": message
+            }
     
     except HTTPException:
         raise

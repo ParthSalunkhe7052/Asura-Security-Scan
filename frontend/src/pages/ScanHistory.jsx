@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clock, TrendingUp, ExternalLink } from 'lucide-react'
+import { Clock, TrendingUp, ExternalLink, Search, Filter, ArrowRight, Calendar, Play } from 'lucide-react'
 import { projectsApi, scansApi } from '../lib/api'
+import Card from '../components/Card'
+import Button from '../components/Button'
+import Badge from '../components/Badge'
+import { useToast } from '../contexts/ToastContext'
 
 function ScanHistory() {
   const navigate = useNavigate()
@@ -12,12 +16,13 @@ function ScanHistory() {
   })
   const [scans, setScans] = useState([])
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const toast = useToast()
 
   useEffect(() => {
     loadProjects()
   }, [])
 
-  // Persist selected project to localStorage
   useEffect(() => {
     if (selectedProject) {
       localStorage.setItem('asura-selected-project', selectedProject.toString())
@@ -32,6 +37,7 @@ function ScanHistory() {
       setLoading(false)
     } catch (error) {
       console.error('Failed to load projects:', error)
+      toast.error('Failed to load projects')
       setLoading(false)
     }
   }
@@ -42,19 +48,7 @@ function ScanHistory() {
       setScans(response.data)
     } catch (error) {
       console.error('Failed to load scans:', error)
-    }
-  }
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'COMPLETED':
-        return 'bg-green-100 text-green-800'
-      case 'RUNNING':
-        return 'bg-blue-100 text-blue-800'
-      case 'FAILED':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
+      toast.error('Failed to load scans')
     }
   }
 
@@ -66,167 +60,163 @@ function ScanHistory() {
     return `${minutes}m ${secs}s`
   }
 
+  const filteredScans = scans.filter(scan =>
+    scan.scan_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    scan.status.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
-      </div>
-    )
-  }
-
-  if (projects.length === 0) {
-    return (
-      <div className="card text-center py-12">
-        <Clock className="mx-auto text-gray-400 mb-4" size={64} />
-        <h3 className="text-xl font-semibold text-gray-700 mb-2">No scan history yet</h3>
-        <p className="text-gray-600 mb-6">Create a project and run your first scan to see results here</p>
-        <button
-          onClick={() => navigate('/projects')}
-          className="btn-primary"
-        >
-          Create Project
-        </button>
+      <div className="flex items-center justify-center h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div>
       </div>
     )
   }
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Scan History</h1>
-        <p className="text-gray-600 dark:text-gray-400">Track all your security scans over time</p>
-      </div>
-
-      {/* Project Selector */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-600 mb-6">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Select Project
-        </label>
-        <select
-          value={selectedProject || ''}
-          onChange={(e) => setSelectedProject(Number(e.target.value))}
-          className="w-full md:w-64 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 dark:focus:ring-blue-500 focus:border-transparent bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
-        >
-          {projects.map(project => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Scans Table */}
-      {scans.length === 0 ? (
-        <div className="card text-center py-12">
-          <p className="text-gray-600">No scans found for this project</p>
-          <button
-            onClick={() => navigate('/')}
-            className="btn-primary mt-4"
-          >
-            Run First Scan
-          </button>
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Scan History</h1>
+          <p className="text-gray-400 mt-1">Track and analyze your security scans over time</p>
         </div>
-      ) : (
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-600 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Scan Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Type
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Started
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Duration
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Issues
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Health Score
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-200 dark:divide-slate-700">
-                {scans.map(scan => (
-                  <tr key={scan.id} className="hover:bg-gray-50 dark:hover:bg-slate-700 transition">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
-                        {scan.scan_name || `Scan #${scan.id}`}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-gray-600 dark:text-gray-300 capitalize">{scan.scan_type}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(scan.status)}`}>
-                        {scan.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                      {new Date(scan.started_at).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                      {formatDuration(scan.duration_seconds)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`text-sm font-semibold ${
-                        scan.total_issues === 0 ? 'text-green-600' :
-                        scan.total_issues < 10 ? 'text-yellow-600' :
-                        'text-red-600'
-                      }`}>
-                        {scan.total_issues}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {scan.health_score !== null ? (
-                        <div className="flex items-center gap-2">
-                          <TrendingUp
-                            size={16}
-                            className={
-                              scan.health_score >= 80 ? 'text-green-600' :
-                              scan.health_score >= 60 ? 'text-yellow-600' :
-                              'text-red-600'
-                            }
-                          />
-                          <span className={`text-sm font-semibold ${
-                            scan.health_score >= 80 ? 'text-green-600' :
-                            scan.health_score >= 60 ? 'text-yellow-600' :
-                            'text-red-600'
-                          }`}>
-                            {scan.health_score.toFixed(0)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={() => navigate(`/security/${scan.id}`)}
-                        className="text-purple-600 hover:text-purple-800 flex items-center gap-1"
-                      >
-                        View
-                        <ExternalLink size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+        {projects.length > 0 && (
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedProject || ''}
+              onChange={(e) => setSelectedProject(Number(e.target.value))}
+              className="input-field min-w-[200px]"
+            >
+              <option value="" disabled>Select Project</option>
+              {projects.map(project => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
           </div>
-        </div>
+        )}
+      </div>
+
+      {projects.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center py-16 text-center border-dashed border-2 border-white/10 bg-transparent">
+          <div className="w-20 h-20 rounded-full bg-dark-800 flex items-center justify-center mb-6 border border-white/5">
+            <Clock className="w-10 h-10 text-gray-500" />
+          </div>
+          <h3 className="text-xl font-bold text-white mb-2">No scan history yet</h3>
+          <p className="text-gray-400 max-w-md mb-8">
+            Create a project and run your first scan to see results here.
+          </p>
+          <Button onClick={() => navigate('/projects')} icon={ArrowRight}>
+            Create Project
+          </Button>
+        </Card>
+      ) : !selectedProject ? (
+        <Card className="text-center py-12">
+          <p className="text-gray-400">Select a project to view scan history</p>
+        </Card>
+      ) : scans.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center py-12 text-center">
+          <p className="text-gray-400 mb-4">No scans found for this project</p>
+          <Button onClick={() => navigate('/')} icon={Play} variant="neon">
+            Run First Scan
+          </Button>
+        </Card>
+      ) : (
+        <>
+          <div className="flex gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Search scans..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="input-field pl-10"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {filteredScans.map(scan => (
+              <Card
+                key={scan.id}
+                className="group hover:border-primary-500/30 transition-all duration-300 cursor-pointer"
+                onClick={() => navigate(`/security/${scan.id}`)}
+              >
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3 rounded-xl ${scan.status === 'COMPLETED' ? 'bg-green-500/10 text-green-500' :
+                        scan.status === 'FAILED' ? 'bg-red-500/10 text-red-500' :
+                          'bg-blue-500/10 text-blue-500'
+                      }`}>
+                      <Clock className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-white group-hover:text-primary-400 transition-colors">
+                        {scan.scan_name || `Scan #${scan.id}`}
+                      </h3>
+                      <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {new Date(scan.started_at).toLocaleString()}
+                        </span>
+                        <span>•</span>
+                        <span>{formatDuration(scan.duration_seconds)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-6">
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Issues</p>
+                      <p className={`font-bold ${scan.total_issues === 0 ? 'text-green-500' :
+                          scan.total_issues < 10 ? 'text-yellow-500' :
+                            'text-red-500'
+                        }`}>
+                        {scan.total_issues}
+                      </p>
+                    </div>
+
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Health</p>
+                      <div className="flex items-center gap-1">
+                        {scan.health_score !== null ? (
+                          <>
+                            <TrendingUp className={`w-4 h-4 ${scan.health_score >= 80 ? 'text-green-500' :
+                                scan.health_score >= 60 ? 'text-yellow-500' :
+                                  'text-red-500'
+                              }`} />
+                            <span className={`font-bold ${scan.health_score >= 80 ? 'text-green-500' :
+                                scan.health_score >= 60 ? 'text-yellow-500' :
+                                  'text-red-500'
+                              }`}>
+                              {scan.health_score.toFixed(0)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="w-px h-8 bg-white/10" />
+
+                    <Badge variant={
+                      scan.status === 'COMPLETED' ? 'success' :
+                        scan.status === 'FAILED' ? 'critical' : 'info'
+                    }>
+                      {scan.status}
+                    </Badge>
+
+                    <ExternalLink className="w-5 h-5 text-gray-500 group-hover:text-white transition-colors" />
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

@@ -1,0 +1,41 @@
+# Bandit Security Configuration for Asura
+# https://bandit.readthedocs.io/en/latest/config.html
+
+[bandit]
+# Paths to exclude from scanning (glob patterns)
+exclude_dirs = [
+    '/tests/',
+    '/test/',
+    '/**/test_*.py',
+    '/**/*_test.py',
+    '/venv/',
+    '/.venv/',
+    '/node_modules/',
+    '/__pycache__/'
+]
+
+# Tests to skip
+# B101: Use of assert - skip for all test files
+# B404: Import of subprocess - we use it safely
+# B603: Subprocess without shell=True - we document all usage
+skips = ['B101']
+
+# Only report issues with HIGH confidence
+# This reduces false positives while catching real issues
+# Options: LOW, MEDIUM, HIGH
+confidence = HIGH
+
+# Severity level to report
+# Options: LOW, MEDIUM, HIGH
+# We want to see all severities but with high confidence
+level = LOW
+
+# Additional Notes:
+# - B101 (assert): Suppressed because assert in tests is standard pytest practice
+#   Tests are not shipped to production, so this is safe.
+#
+# - B404/B603 (subprocess): Not suppressed here because we want to be reminded
+#   to document any new subprocess usage. All existing usage has # nosec annotations.
+#
+# - This configuration applies when Bandit is run with: bandit -c .bandit
+#   The scanner.py file automatically detects and uses this config.

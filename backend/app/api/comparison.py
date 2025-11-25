@@ -7,7 +7,7 @@ from sqlalchemy import func
 from typing import Dict, Any
 
 from app.core.database import get_db
-from app.models.models import Scan, Vulnerability
+from app.models.models import Scan, Vulnerability, ScanStatusEnum
 
 router = APIRouter(prefix="/api/comparison", tags=["comparison"])
 
@@ -125,7 +125,7 @@ async def get_recent_scans_for_comparison(
     """
     scans = db.query(Scan).filter(
         Scan.project_id == project_id,
-        Scan.status == 'COMPLETED'
+        Scan.status == ScanStatusEnum.COMPLETED
     ).order_by(Scan.started_at.desc()).limit(limit).all()
     
     return [

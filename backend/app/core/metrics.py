@@ -213,8 +213,14 @@ class CodeMetricsAnalyzer:
                 print(f"⚠️  {result['error']}")
                 return result
             
+            
             print(f"📊 Running radon complexity analysis on {len(source_files)} files")
             
+            # SECURITY: Safe subprocess usage
+            # - Uses sys.executable (Python interpreter - controlled by system, not user input)
+            # - Uses hardcoded radon command with fixed flags
+            # - Uses validated file paths from get_important_source_files() which filters and validates
+            # - No shell=True, no user-controllable input reaches subprocess
             # Run radon on specific files instead of whole directory
             # This prevents timeout on large projects
             cmd = [
@@ -223,7 +229,7 @@ class CodeMetricsAnalyzer:
                 "-j"   # JSON output
             ] + [str(f) for f in source_files]
             
-            process = subprocess.run(
+            process = subprocess.run(  # nosec B603
                 cmd,
                 capture_output=True,
                 text=True,
@@ -334,8 +340,13 @@ class CodeMetricsAnalyzer:
             
             print(f"🧪 Running coverage analysis on tests in: {self.test_dir.name}")
             
+            # SECURITY: Safe subprocess usage
+            # - Uses sys.executable (controlled), hardcoded pytest command
+            # - Uses validated project path from constructor (validate_project_path)
+            # - Uses validated test directory path (checked to exist)
+            # - No shell=True, no user-controllable arguments
             # Run coverage from the project directory
-            process = subprocess.run(
+            process = subprocess.run(  # nosec B603
                 cmd,
                 cwd=str(self.project_path),  # FIXED: Run from project dir, not parent
                 capture_output=True,
@@ -397,8 +408,8 @@ class CodeMetricsAnalyzer:
         
         return result
     
+    @staticmethod
     def compute_code_health_score(
-        self,
         security_score: float = 0.0,
         coverage_score: float = 0.0
     ) -> Dict[str, Any]:
@@ -499,7 +510,8 @@ def self_test():
     # Test 1: Check radon installation
     print("\n1. Checking radon installation...")
     try:
-        result = subprocess.run(
+        # SECURITY: Safe - uses sys.executable and hardcoded command, no user input
+        result = subprocess.run(  # nosec B603
             [sys.executable, "-m", "radon", "--version"],
             capture_output=True,
             text=True,
@@ -513,7 +525,8 @@ def self_test():
     # Test 2: Check coverage installation
     print("\n2. Checking coverage installation...")
     try:
-        result = subprocess.run(
+        # SECURITY: Safe - uses sys.executable and hardcoded command, no user input
+        result = subprocess.run(  # nosec B603
             [sys.executable, "-m", "coverage", "--version"],
             capture_output=True,
             text=True,

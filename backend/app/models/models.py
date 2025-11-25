@@ -114,3 +114,22 @@ class Config(Base):
     value = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index('idx_notification_created_at', 'created_at'),
+        Index('idx_notification_is_read', 'is_read'),
+    )
+    
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String, nullable=False)  # "scan_started", "scan_completed", "scan_failed"
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    scan_id = Column(Integer, ForeignKey("scans.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    is_read = Column(Integer, default=0)  # 0 = unread, 1 = read (using integer for SQLite compatibility)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    scan = relationship("Scan", backref="notifications")
+    project = relationship("Project", backref="notifications")

@@ -1,0 +1,32 @@
+name: Security Scan
+on: [pull_request, workflow_dispatch]
+
+jobs:
+  asura-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install Asura Dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          
+      - name: Run Asura Security Scan
+        run: |
+          # Run scan on the current directory, fail on HIGH severity, output SARIF
+          # We set PYTHONPATH to backend so we can import 'app' module
+          python -m app.cli . --format sarif --output results.sarif --fail-on HIGH
+        env:
+          PYTHONPATH: backend
+          
+      - name: Upload SARIF to GitHub Security Tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: results.sarif
+          category: asura

@@ -7,25 +7,27 @@ from pathlib import Path
 from datetime import datetime
 import argparse
 import fnmatch
+from app.utils.path_validator import PathValidator
+from app.utils.path_validator import PathValidator
+from app.utils.dependency_checker import DependencyChecker
+from app.utils.badge_generator import generate_badge
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def validate_scanner_path(path: str) -> tuple:
     """
     Validate project path for security scanning.
     Returns: (is_valid, error_message)
-    """
-    if not Path(path).exists():
-        return False, f"Project path does not exist: {path}"
     
-    # Reject paths with special characters that cause issues with CLI tools on Windows
-    if sys.platform == 'win32' and ('+' in path or ' ' in path):
-        return False, (
-            f"Path contains special characters (+, spaces) that cause issues with security scanners on Windows.\n"
-            f"Path: {path}\n\n"
-            f"Solution: Please rename your project folder to remove spaces and special characters.\n"
-            f"Example: 'Clash Emote Detector+' → 'ClashEmoteDetector'\n\n"
-            f"Then update the project path in ASURA Projects page."
-        )
+    This function now uses PathValidator for enhanced security.
+    """
+    allowed_roots = PathValidator.get_allowed_roots_from_env()
+    is_valid, error_msg, resolved_path = PathValidator.sanitize_and_validate(path, allowed_roots)
+    
+    if not is_valid:
+        return False, error_msg
     
     return True, ""
 
@@ -56,6 +58,22 @@ def get_scannable_files(project_path: Path, max_files: int = 1000) -> Dict[str, 
         '*.svg', '*.png', '*.jpg', '*.jpeg', '*.gif',
         '*.woff', '*.woff2', '*.ttf', '*.eot', '*.ico'
     }
+
+    # Load .asuraignore patterns
+    ignore_file = project_path / ".asuraignore"
+    if ignore_file.exists():
+        try:
+            with open(ignore_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        skip_patterns.add(line)
+                        # Also add directory exclusion if it looks like a dir
+                        if line.endswith('/'):
+                            skip_dirs.add(line.rstrip('/'))
+            print(f"📋 Loaded ignore patterns from .asuraignore")
+        except Exception as e:
+            print(f"⚠️  Error reading .asuraignore: {e}")
     
     scannable_extensions = {
         '.py', '.js', '.jsx', '.ts', '.tsx', '.vue',
@@ -149,6 +167,50 @@ class SecurityScanner:
         
         # Get filtered list of files to scan (prevents timeout on large projects)
         self.scannable_files = get_scannable_files(self.project_path, max_files=1000)
+        
+        # Load timeout configuration from environment variables
+        self.bandit_timeout = int(os.environ.get('BANDIT_TIMEOUT', '120'))
+        self.safety_timeout = int(os.environ.get('SAFETY_TIMEOUT', '60'))
+        self.semgrep_timeout = int(os.environ.get('SEMGREP_TIMEOUT', '180'))
+        self.detect_secrets_timeout = int(os.environ.get('DETECT_SECRETS_TIMEOUT', '60'))
+        self.npm_timeout = int(os.environ.get('NPM_TIMEOUT', '120'))
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((ConnectionError, OSError)),
+        reraise=True
+    )
+    def _run_subprocess_with_retry(self, cmd, timeout, env=None, **kwargs):
+        """
+        Run subprocess with automatic retry on transient failures.
+        Retries up to 3 times with exponential backoff (2s, 4s, 8s).
+        
+        SECURITY: This method is safe because:
+        - All commands passed to it are constructed with controlled inputs
+        - Uses sys.executable (system Python interpreter)
+        - Uses validated, filtered file paths from get_scannable_files()
+        - Uses hardcoded scanner tool names (bandit, safety, semgrep)
+        - No user-controllable input reaches subprocess
+        - Never uses shell=True
+        """
+        try:
+            result = subprocess.run(  # nosec B603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                encoding='utf-8',
+                errors='replace',
+                env=env or os.environ.copy(),
+                **kwargs
+            )
+            return result
+        except (ConnectionError, OSError) as e:
+            # Log retry attempt
+            logging.warning(f"Subprocess call failed, will retry: {e}")
+            raise
     
     def run_bandit(self) -> Tuple[List[Dict[str, Any]], str]:
         """Run Bandit security scanner for Python code
@@ -172,17 +234,20 @@ class SecurityScanner:
             cmd = [
                 sys.executable, "-m", "bandit",
                 "-f", "json"
-            ] + [str(f) for f in python_files]
+            ]
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 min should be enough for filtered files
-                check=False,  # Don't raise on non-zero exit
-                encoding='utf-8',
-                errors='replace'  # Replace encoding errors
-            )
+            # Check if .bandit configuration file exists in project root
+            # This suppresses false positives like B101 (assert in tests)
+            bandit_config = self.project_path / ".bandit"
+            if bandit_config.exists():
+                cmd.extend(["-c", str(bandit_config)])
+                print(f"📋 Using Bandit configuration: {bandit_config.name}")
+                self.progress_messages.append(f"Using Bandit config to suppress false positives")
+            
+            # Add files to scan
+            cmd.extend([str(f) for f in python_files])
+            
+            result = self._run_subprocess_with_retry(cmd, timeout=self.bandit_timeout)
             
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
@@ -234,7 +299,7 @@ class SecurityScanner:
             return vulnerabilities, "success"
             
         except subprocess.TimeoutExpired:
-            error_msg = "Bandit scan timed out (300s)"
+            error_msg = f"Bandit scan timed out ({self.bandit_timeout}s)"
             print(f"⚠️  {error_msg}")
             return [], error_msg
         except FileNotFoundError:
@@ -292,16 +357,7 @@ class SecurityScanner:
             env['PYTHONIOENCODING'] = 'utf-8'
             env['PYTHONUTF8'] = '1'
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-                encoding='utf-8',
-                errors='replace',  # Replace encoding errors
-                env=env
-            )
+            result = self._run_subprocess_with_retry(cmd, timeout=self.safety_timeout, env=env)
             
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
@@ -379,7 +435,7 @@ class SecurityScanner:
             return vulnerabilities, "success"
             
         except subprocess.TimeoutExpired:
-            error_msg = "Safety scan timed out (120s)"
+            error_msg = f"Safety scan timed out ({self.safety_timeout}s)"
             print(f"⚠️  {error_msg}")
             return [], error_msg
         except FileNotFoundError:
@@ -440,16 +496,7 @@ class SecurityScanner:
             env['PYTHONIOENCODING'] = 'utf-8'
             env['PYTHONUTF8'] = '1'
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 min should be enough for filtered files
-                check=False,
-                encoding='utf-8',
-                errors='replace',  # Replace encoding errors
-                env=env
-            )
+            result = self._run_subprocess_with_retry(cmd, timeout=self.semgrep_timeout, env=env)
             
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
@@ -491,7 +538,7 @@ class SecurityScanner:
             return vulnerabilities, "success"
             
         except subprocess.TimeoutExpired:
-            error_msg = "Semgrep scan timed out (120s) even after filtering"
+            error_msg = f"Semgrep scan timed out ({self.semgrep_timeout}s) even after filtering"
             print(f"⚠️  {error_msg}")
             return [], error_msg
         except FileNotFoundError:
@@ -500,6 +547,196 @@ class SecurityScanner:
             return [], error_msg
         except Exception as e:
             error_msg = f"Semgrep scan failed: {type(e).__name__}: {e}"
+            print(f"❌ {error_msg}")
+            return [], error_msg
+
+    def run_detect_secrets(self) -> Tuple[List[Dict[str, Any]], str]:
+        """Run detect-secrets to find hardcoded secrets
+        Returns: (vulnerabilities, status_message)
+        """
+        tool_name = "detect-secrets"
+        try:
+            # We scan the whole project
+            cmd = [sys.executable, "-m", "detect_secrets", "scan", str(self.project_path), "--all-files"]
+            
+            msg = f"🔍 Running detect-secrets on project"
+            print(msg)
+            self.progress_messages.append(msg)
+            
+            result = self._run_subprocess_with_retry(cmd, timeout=self.detect_secrets_timeout)
+            
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
+            
+            self._save_output(tool_name, stdout, stderr, result.returncode)
+            
+            if not stdout:
+                # detect-secrets might return empty JSON if no secrets?
+                # Actually it returns a JSON with "results": {}
+                # If completely empty, it's an error
+                error_msg = f"detect-secrets returned empty output. Return code: {result.returncode}"
+                if stderr:
+                    error_msg += f"\nStderr: {stderr[:500]}"
+                print(f"❌ {error_msg}")
+                return [], error_msg
+                
+            try:
+                data = json.loads(stdout)
+            except json.JSONDecodeError as e:
+                error_msg = f"detect-secrets JSON parse error: {e}"
+                print(f"❌ {error_msg}")
+                self._save_raw_output(tool_name, "unparseable", stdout)
+                return [], error_msg
+                
+            vulnerabilities = []
+            results = data.get("results", {})
+            
+            for file_path, secrets in results.items():
+                for secret in secrets:
+                    vulnerabilities.append({
+                        "tool": "detect-secrets",
+                        "severity": "HIGH", # Secrets are always high/critical
+                        "file_path": file_path,
+                        "line_number": secret.get("line_number"),
+                        "vulnerability_type": secret.get("type", "Secret"),
+                        "description": f"Potential {secret.get('type', 'secret')} found. Hash: {secret.get('hashed_secret', '')[:8]}...",
+                        "code_snippet": "REDACTED", # Don't show the secret
+                        "cwe_id": "CWE-798", # Use of Hard-coded Credentials
+                        "confidence": "HIGH"
+                    })
+            
+            msg = f"✅ detect-secrets: {len(vulnerabilities)} secrets found"
+            print(msg)
+            self.progress_messages.append(msg)
+            return vulnerabilities, "success"
+            
+        except subprocess.TimeoutExpired:
+            error_msg = f"detect-secrets scan timed out ({self.detect_secrets_timeout}s)"
+            print(f"⚠️  {error_msg}")
+            return [], error_msg
+        except FileNotFoundError:
+            error_msg = "detect-secrets not installed. Run: pip install detect-secrets"
+            print(f"❌ {error_msg}")
+            return [], error_msg
+        except Exception as e:
+            error_msg = f"detect-secrets scan failed: {type(e).__name__}: {e}"
+            print(f"❌ {error_msg}")
+            return [], error_msg
+
+    def run_npm_audit(self) -> Tuple[List[Dict[str, Any]], str]:
+        """Run npm audit for JavaScript/TypeScript dependency vulnerabilities
+        Returns: (vulnerabilities, status_message)
+        """
+        tool_name = "npm-audit"
+        try:
+            # Look for package.json
+            package_json = self.project_path / "package.json"
+            if not package_json.exists():
+                # Try finding it in subdirectories (e.g. frontend/)
+                found = list(self.project_path.glob("**/package.json"))
+                # Filter out node_modules
+                found = [p for p in found if "node_modules" not in p.parts]
+                
+                if not found:
+                    msg = "No package.json found, skipping npm audit"
+                    print(f"ℹ️  {msg}")
+                    return [], msg
+                package_json = found[0]
+                
+            project_dir = package_json.parent
+            msg = f"🔍 Running npm audit in {project_dir.name}"
+            print(msg)
+            self.progress_messages.append(msg)
+            
+            # Run npm audit --json
+            # We need shell=True on Windows for npm sometimes, but let's try without first or use shutil.which
+            npm_cmd = "npm"
+            if os.name == 'nt':
+                npm_cmd = "npm.cmd"
+                
+            cmd = [npm_cmd, "audit", "--json"]
+            
+            result = self._run_subprocess_with_retry(cmd, timeout=self.npm_timeout, cwd=str(project_dir))
+            
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
+            
+            self._save_output(tool_name, stdout, stderr, result.returncode)
+            
+            if not stdout:
+                error_msg = f"npm audit returned empty output. Return code: {result.returncode}"
+                if stderr:
+                    error_msg += f"\nStderr: {stderr[:500]}"
+                print(f"❌ {error_msg}")
+                return [], error_msg
+                
+            try:
+                data = json.loads(stdout)
+            except json.JSONDecodeError as e:
+                error_msg = f"npm audit JSON parse error: {e}"
+                print(f"❌ {error_msg}")
+                self._save_raw_output(tool_name, "unparseable", stdout)
+                return [], error_msg
+                
+            vulnerabilities = []
+            
+            # npm audit json structure:
+            # { "advisories": { ... }, "metadata": { ... } } (v6)
+            # { "vulnerabilities": { ... }, "metadata": { ... } } (v7+)
+            
+            vuln_dict = data.get("vulnerabilities", {})
+            if not vuln_dict and "advisories" in data:
+                vuln_dict = data.get("advisories", {})
+                
+            # Flatten the recursive structure if needed, or just take top-level
+            # v7+ structure is complex. Let's try to extract basic info.
+            
+            def extract_vulns(v_data):
+                extracted = []
+                if isinstance(v_data, dict):
+                    for name, info in v_data.items():
+                        if isinstance(info, dict):
+                            severity = info.get("severity", "low").upper()
+                            if severity == "MODERATE": severity = "MEDIUM"
+                            
+                            # v7+ has 'via' which lists sources
+                            via = info.get("via", [])
+                            description = "Vulnerable dependency"
+                            if isinstance(via, list) and via and isinstance(via[0], dict):
+                                description = via[0].get("title", description)
+                            elif isinstance(via, list) and via and isinstance(via[0], str):
+                                description = f"Depends on vulnerable {via[0]}"
+                                
+                            extracted.append({
+                                "tool": "npm-audit",
+                                "severity": severity,
+                                "file_path": "package.json",
+                                "line_number": None,
+                                "vulnerability_type": "VULNERABLE_DEPENDENCY",
+                                "description": f"{name}: {description}",
+                                "code_snippet": f"{name} (version check)",
+                                "cwe_id": None,
+                                "confidence": "HIGH"
+                            })
+                return extracted
+
+            vulnerabilities = extract_vulns(vuln_dict)
+            
+            msg = f"✅ npm-audit: {len(vulnerabilities)} issues found"
+            print(msg)
+            self.progress_messages.append(msg)
+            return vulnerabilities, "success"
+            
+        except subprocess.TimeoutExpired:
+            error_msg = f"npm audit timed out ({self.npm_timeout}s)"
+            print(f"⚠️  {error_msg}")
+            return [], error_msg
+        except FileNotFoundError:
+            error_msg = "npm not found. Install Node.js"
+            print(f"❌ {error_msg}")
+            return [], error_msg
+        except Exception as e:
+            error_msg = f"npm audit failed: {type(e).__name__}: {e}"
             print(f"❌ {error_msg}")
             return [], error_msg
     
@@ -518,47 +755,108 @@ class SecurityScanner:
         if progress_callback:
             progress_callback('\n'.join(self.progress_messages))
         
-        # Run Bandit
-        self.progress_messages.append("🔴 Step 1/3: Running Bandit scanner...")
+        # Run scanners in parallel using ThreadPoolExecutor
+        self.progress_messages.append("🚀 Running all scanners in parallel for faster results...")
         if progress_callback:
             progress_callback('\n'.join(self.progress_messages))
         
-        bandit_results, bandit_status = self.run_bandit()
-        if progress_callback:
-            progress_callback('\n'.join(self.progress_messages))
+        # Check scanner availability and filter out unavailable ones
+        available_scanners = {}
+        unavailable_scanners = {}
         
-        # Run Safety
-        self.progress_messages.append("")
-        self.progress_messages.append("🟡 Step 2/3: Running Safety scanner...")
-        if progress_callback:
-            progress_callback('\n'.join(self.progress_messages))
-        
-        safety_results, safety_status = self.run_safety()
-        if progress_callback:
-            progress_callback('\n'.join(self.progress_messages))
-        
-        # Run Semgrep
-        self.progress_messages.append("")
-        self.progress_messages.append("🔵 Step 3/3: Running Semgrep scanner...")
-        if progress_callback:
-            progress_callback('\n'.join(self.progress_messages))
-        
-        semgrep_results, semgrep_status = self.run_semgrep()
-        if progress_callback:
-            progress_callback('\n'.join(self.progress_messages))
-        
-        all_vulnerabilities = bandit_results + safety_results + semgrep_results
-        
-        # Track tool statuses
-        tool_statuses = {
-            "bandit": bandit_status,
-            "safety": safety_status,
-            "semgrep": semgrep_status
+        all_scanners = {
+            "bandit": self.run_bandit,
+            "safety": self.run_safety,
+            "semgrep": self.run_semgrep,
+            "detect-secrets": self.run_detect_secrets,
+            "npm-audit": self.run_npm_audit
         }
+        
+        for scanner_name, scanner_func in all_scanners.items():
+            if DependencyChecker.is_scanner_available(scanner_name):
+                available_scanners[scanner_name] = scanner_func
+            else:
+                unavailable_scanners[scanner_name] = "not installed"
+                msg = f"⚠️  {scanner_name.capitalize()} not available - skipping"
+                print(msg)
+                self.progress_messages.append(msg)
+        
+        # If no scanners available, return early with error
+        if not available_scanners:
+            error_msg = "❌ No security scanners available. Please install at least one: pip install bandit safety semgrep detect-secrets"
+            print(error_msg)
+            self.progress_messages.append(error_msg)
+            if progress_callback:
+                progress_callback('\n'.join(self.progress_messages))
+            
+            return {
+                "vulnerabilities": [],
+                "total_issues": 0,
+                "severity_counts": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0},
+                "tools_used": [],
+                "overall_status": "failed",
+                "tool_statuses": unavailable_scanners,
+                "failed_tools": list(unavailable_scanners.keys()),
+                "logs_path": str(self.logs_dir)
+            }
+        
+        # Update progress with available scanners
+        if unavailable_scanners:
+            msg = f"ℹ️  Running {len(available_scanners)}/{len(all_scanners)} available scanners: {', '.join(available_scanners.keys())}"
+            print(msg)
+            self.progress_messages.append(msg)
+            if progress_callback:
+                progress_callback('\n'.join(self.progress_messages))
+        
+        # Execute available scanners concurrently
+        tool_statuses = {}
+        all_results = {}
+        
+        # Initialize statuses for unavailable scanners
+        for scanner_name, reason in unavailable_scanners.items():
+            tool_statuses[scanner_name] = f"skipped: {reason}"
+            all_results[scanner_name] = []
+        
+        max_workers = min(3, len(available_scanners))  # Adjust workers based on available scanners
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit only available scanner jobs
+            future_to_scanner = {
+                executor.submit(scanner_func): scanner_name 
+                for scanner_name, scanner_func in available_scanners.items()
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_scanner):
+                scanner_name = future_to_scanner[future]
+                try:
+                    results, status = future.result()
+                    all_results[scanner_name] = results
+                    tool_statuses[scanner_name] = status
+                    
+                    # Update progress as each scanner completes
+                    icon = {"bandit": "🔴", "safety": "🟡", "semgrep": "🔵", "detect-secrets": "🔑", "npm-audit": "📦"}.get(scanner_name, "⚪")
+                    self.progress_messages.append(f"{icon} {scanner_name.capitalize()} completed: {len(results)} issues found")
+                    if progress_callback:
+                        progress_callback('\n'.join(self.progress_messages))
+                        
+                except Exception as e:
+                    # Handle scanner failures gracefully
+                    logging.error(f"{scanner_name} scanner failed: {e}")
+                    all_results[scanner_name] = []
+                    tool_statuses[scanner_name] = f"failed: {str(e)}"
+                    self.progress_messages.append(f"❌ {scanner_name.capitalize()} failed: {str(e)[:100]}")
+                    if progress_callback:
+                        progress_callback('\n'.join(self.progress_messages))
+        
+        # Combine all results
+        all_vulnerabilities = []
+        for scanner_name in ["bandit", "safety", "semgrep", "detect-secrets", "npm-audit"]:
+            all_vulnerabilities.extend(all_results.get(scanner_name, []))
         
         # Determine overall scan status
         failed_tools = [tool for tool, status in tool_statuses.items() if status != "success" and "skipping" not in status.lower()]
-        if len(failed_tools) == 3:
+        if len(failed_tools) == 5:
             overall_status = "failed"
         elif failed_tools:
             overall_status = "partial_complete"
@@ -598,6 +896,30 @@ class SecurityScanner:
             print(msg)
         self.progress_messages.extend(summary_msgs)
         
+        # Calculate Health Score & Grade for Badge
+        # Simple logic: Start at 100, deduct points
+        # CRITICAL: -20, HIGH: -10, MEDIUM: -5, LOW: -1
+        score = 100
+        score -= (severity_counts["CRITICAL"] * 20)
+        score -= (severity_counts["HIGH"] * 10)
+        score -= (severity_counts["MEDIUM"] * 5)
+        score -= (severity_counts["LOW"] * 1)
+        score = max(0, score)
+        
+        if score >= 90: grade = "A"
+        elif score >= 80: grade = "B"
+        elif score >= 70: grade = "C"
+        elif score >= 60: grade = "D"
+        elif score >= 50: grade = "E"
+        else: grade = "F"
+        
+        # Generate Badge
+        badge_path = self.project_path / "security-badge.svg"
+        if generate_badge(score, grade, badge_path):
+            msg = f"🛡️  Security Badge generated: {badge_path.name}"
+            print(msg)
+            self.progress_messages.append(msg)
+
         # Final progress update
         if progress_callback:
             progress_callback('\n'.join(self.progress_messages))
@@ -606,7 +928,7 @@ class SecurityScanner:
             "vulnerabilities": all_vulnerabilities,
             "total_issues": len(all_vulnerabilities),
             "severity_counts": severity_counts,
-            "tools_used": ["bandit", "safety", "semgrep"],
+            "tools_used": ["bandit", "safety", "semgrep", "detect-secrets", "npm-audit"],
             "overall_status": overall_status,
             "tool_statuses": tool_statuses,
             "failed_tools": failed_tools,
