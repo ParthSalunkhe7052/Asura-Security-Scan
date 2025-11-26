@@ -5,57 +5,22 @@
 [![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](https://reactjs.org/)
 [![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](docs/CHANGELOG.md)
 
-## The Hook (For HR/Managers)
+> **Your intelligent, privacy-first security companion.**
 
-**What is it?**
-A privacy-first, local security and code quality scanner that combines open-source tools with AI analysis to secure your code.
+Asura transforms the tedious process of security auditing into a seamless part of your workflow. Instead of manually wrangling multiple CLI tools or risking data privacy with cloud scanners, Asura provides a unified, local dashboard that identifies vulnerabilities and—crucially—tells you exactly how to fix them.
 
-**The Problem**
-Developers waste time manually configuring multiple security tools and worrying about data privacy when using cloud-based scanners.
+It combines industry-standard static analysis with local AI to act as a **private security analyst**, saving you hours of debugging time while ensuring your code never leaves your machine.
 
-**The Solution**
-Asura automates security auditing by running industry-standard scanners (Bandit, Semgrep, Safety) locally and using AI to explain vulnerabilities and generate fixes, saving hours of debugging time while keeping code 100% private.
+---
 
-**Example**
-"Instead of 'Running a Python script with Bandit and Semgrep,' say 'An automated security analyst that finds vulnerabilities and writes the fix for you.'"
+## ⚡ Technical Architecture
 
-## The Tech (For Developers/CTOs)
+Asura is built for performance, privacy, and extensibility.
 
-**Tech Stack**
-- **Frontend:** React 18, Vite, TailwindCSS, Recharts
-- **Backend:** Python 3.11+, FastAPI, SQLAlchemy, SQLite
-- **Scanners:** Bandit, Safety, Semgrep, Radon
-
-**Architecture**
-The React frontend provides a responsive dashboard that communicates with the FastAPI backend via REST endpoints. The backend orchestrates local CLI tools (scanners) to analyze the codebase, parses their output, and stores structured results in a local SQLite database. AI analysis is integrated to process these results and generate natural language explanations and fixes.
-
-**Installation**
-You can run Asura locally in minutes.
-
-**One-Click Setup (Windows)**
-```bash
-git clone https://github.com/ParthSalunkhe7052/Asura-Security-Scan.git
-cd Asura-Security-Scan
-setup.bat
-start.bat
-```
-
-**Manual Setup**
-1. **Backend**:
-   ```bash
-   cd backend
-   python -m venv venv
-   .\venv\Scripts\activate
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload --port 8000
-   ```
-2. **Frontend**:
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   Access the app at `http://localhost:5173`.
+- **Core Engine**: A high-performance **FastAPI** backend orchestrates local CLI tools (Bandit, Semgrep, Safety) to analyze code in real-time.
+- **Data Layer**: Results are parsed and stored in a local **SQLite** database via **SQLAlchemy**, ensuring zero data latency and complete privacy.
+- **Intelligence**: An integrated AI layer processes scan results to generate natural language explanations and code fixes, running entirely offline or via optional API integrations.
+- **Interface**: A modern **React 18** frontend with **Vite** and **TailwindCSS** provides a responsive, professional dashboard for managing security insights.
 
 ---
 
@@ -67,7 +32,7 @@ start.bat
 - **Semgrep**: Multi-language static analysis with 1000+ rules.
 - **Real-time Progress**: Watch scans execute live.
 
-### 🤖 AI-Powered Analysis (New!)
+### 🤖 AI-Powered Analysis
 - **Smart Explanations**: AI explains vulnerabilities in plain English.
 - **Auto-Fix Suggestions**: Get secure code alternatives instantly.
 - **AI Auto Fix Prompt**: Generate prompts for AI IDEs (Cursor, Windsurf) to fix issues automatically.
@@ -106,6 +71,37 @@ Drill down into specific vulnerabilities with code snippets and severity levels.
 ### AI Summary & Fixes
 Understand issues quickly with AI-generated summaries and fix suggestions.
 ![AI Summary](screenshots/ai_summary.png)
+
+---
+
+## 🚀 Quick Start
+
+### One-Click Setup (Windows)
+```bash
+git clone https://github.com/ParthSalunkhe7052/Asura-Security-Scan.git
+cd Asura-Security-Scan
+setup.bat
+start.bat
+```
+
+### Manual Setup
+
+**Backend**
+```bash
+cd backend
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+**Frontend**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Access the app at `http://localhost:5173`.
 
 ---
 
