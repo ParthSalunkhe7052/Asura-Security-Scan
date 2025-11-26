@@ -1,13 +1,61 @@
 # 🔥 ASURA - AI SecureLab
 
-> **An all-in-one local security testing and code quality tool for developers.**
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](https://reactjs.org/)
 [![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](docs/CHANGELOG.md)
 
-**ASURA** is a privacy-first security testing tool designed for solo developers and small teams. It combines open-source scanners with AI-powered analysis to identify vulnerabilities and provide actionable fixes—all while keeping your code 100% local.
+## The Hook (For HR/Managers)
+
+**What is it?**
+A privacy-first, local security and code quality scanner that combines open-source tools with AI analysis to secure your code.
+
+**The Problem**
+Developers waste time manually configuring multiple security tools and worrying about data privacy when using cloud-based scanners.
+
+**The Solution**
+Asura automates security auditing by running industry-standard scanners (Bandit, Semgrep, Safety) locally and using AI to explain vulnerabilities and generate fixes, saving hours of debugging time while keeping code 100% private.
+
+**Example**
+"Instead of 'Running a Python script with Bandit and Semgrep,' say 'An automated security analyst that finds vulnerabilities and writes the fix for you.'"
+
+## The Tech (For Developers/CTOs)
+
+**Tech Stack**
+- **Frontend:** React 18, Vite, TailwindCSS, Recharts
+- **Backend:** Python 3.11+, FastAPI, SQLAlchemy, SQLite
+- **Scanners:** Bandit, Safety, Semgrep, Radon
+
+**Architecture**
+The React frontend provides a responsive dashboard that communicates with the FastAPI backend via REST endpoints. The backend orchestrates local CLI tools (scanners) to analyze the codebase, parses their output, and stores structured results in a local SQLite database. AI analysis is integrated to process these results and generate natural language explanations and fixes.
+
+**Installation**
+You can run Asura locally in minutes.
+
+**One-Click Setup (Windows)**
+```bash
+git clone https://github.com/ParthSalunkhe7052/Asura-Security-Scan.git
+cd Asura-Security-Scan
+setup.bat
+start.bat
+```
+
+**Manual Setup**
+1. **Backend**:
+   ```bash
+   cd backend
+   python -m venv venv
+   .\venv\Scripts\activate
+   pip install -r requirements.txt
+   uvicorn app.main:app --reload --port 8000
+   ```
+2. **Frontend**:
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Access the app at `http://localhost:5173`.
 
 ---
 
@@ -58,61 +106,6 @@ Drill down into specific vulnerabilities with code snippets and severity levels.
 ### AI Summary & Fixes
 Understand issues quickly with AI-generated summaries and fix suggestions.
 ![AI Summary](screenshots/ai_summary.png)
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- **Python 3.11+**
-- **Node.js 18+**
-- **Git**
-
-### One-Click Setup (Windows)
-```bash
-# Clone the repository
-git clone https://github.com/ParthSalunkhe7052/Asura-Security-Scan.git
-cd Asura-Security-Scan
-
-# Run setup and start
-setup.bat
-start.bat
-```
-
-### Manual Setup
-
-#### 1. Backend
-```bash
-cd backend
-python -m venv venv
-.\venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-
-#### 2. Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Access the app at `http://localhost:5173`.
-
----
-
-## 🛠️ Tech Stack
-
-**Backend**
-- **FastAPI**: High-performance Python web framework.
-- **SQLAlchemy & SQLite**: Robust local database management.
-- **Scanners**: Bandit, Safety, Semgrep.
-
-**Frontend**
-- **React 18**: Modern UI library.
-- **Vite**: Next-generation build tool.
-- **TailwindCSS**: Utility-first styling.
-- **Recharts**: Data visualization.
 
 ---
 
